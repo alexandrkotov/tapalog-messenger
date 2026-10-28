@@ -10,18 +10,17 @@ async function waitForServiceWorker(page: Page) {
   });
 }
 
-test("opens the app shell and reaches the server", async ({ page }) => {
+test("opens the sign-in screen", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Tapalog Messenger" })).toBeVisible();
-  await expect(page.getByTestId("connection")).toHaveAttribute("data-state", "online");
-  await expect(page.getByTestId("connection")).toHaveText("Server is online");
+  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
 });
 
 test.describe("in Russian", () => {
   test.use({ locale: "ru-RU" });
   test("speaks the browser's language", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByTestId("connection")).toHaveText("Сервер на связи");
+    await expect(page.getByRole("button", { name: "Войти" })).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("lang", "ru");
   });
 });
@@ -29,8 +28,8 @@ test.describe("in Russian", () => {
 test.describe("in Ukrainian", () => {
   test.use({ locale: "uk-UA" });
   test("speaks the browser's language", async ({ page }) => {
-    await page.goto("/");
-    await expect(page.getByTestId("connection")).toHaveText("Сервер на зв'язку");
+    await page.goto("/invite/whatever");
+    await expect(page.getByRole("heading", { name: "Створіть акаунт" })).toBeVisible();
   });
 });
 
@@ -66,5 +65,6 @@ test("the status page and shutdown are closed without the admin key", async ({ r
   expect((await request.get("/status")).status()).toBe(403);
   expect((await request.get("/status.json")).status()).toBe(403);
   expect((await request.post("/shutdown")).status()).toBe(403);
+  expect((await request.post("/admin/invite")).status()).toBe(403);
   expect((await request.get("/healthz")).status()).toBe(200);
 });

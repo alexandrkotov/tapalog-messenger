@@ -9,3 +9,5 @@ export interface HealthResponse {
   /** SQLite schema version (PRAGMA user_version) after migrations ran. */
   schema: number;
 }
+
+export * from "./protocol";

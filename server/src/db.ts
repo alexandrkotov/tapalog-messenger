@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import m0001 from "./migrations/0001_init.sql" with { type: "text" };
+import m0002 from "./migrations/0002_core.sql" with { type: "text" };
 
 /**
  * Numbered schema migrations, embedded in the binary as text. Migration N
@@ -8,7 +9,7 @@ import m0001 from "./migrations/0001_init.sql" with { type: "text" };
  * own PRAGMA user_version, so no bookkeeping table is needed. Append only:
  * never edit a migration that has shipped.
  */
-export const MIGRATIONS: readonly string[] = [m0001];
+export const MIGRATIONS: readonly string[] = [m0001, m0002];
 
 export const DB_FILE_NAME = "messenger.db";
 

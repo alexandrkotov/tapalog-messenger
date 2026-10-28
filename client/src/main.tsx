@@ -1,11 +1,40 @@
 import { render } from "preact";
+import { useState } from "preact/hooks";
 import { App } from "./App";
-import { pickLang, t } from "./i18n";
+import { pickLang, t, type Lang } from "./i18n";
+import { LangContext } from "./ui/common";
 import "./styles.css";
 
-const lang = pickLang(navigator.languages ?? [navigator.language]);
-document.documentElement.lang = lang;
-render(<App s={t(lang)} />, document.getElementById("app")!);
+const LANG_KEY = "lang";
+
+function savedLang(): Lang | null {
+  try {
+    const saved = localStorage.getItem(LANG_KEY);
+    return saved ? pickLang([saved]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function Root() {
+  const [lang, setLangState] = useState<Lang>(() => savedLang() ?? pickLang(navigator.languages ?? [navigator.language]));
+  document.documentElement.lang = lang;
+  const setLang = (l: Lang) => {
+    try {
+      localStorage.setItem(LANG_KEY, l);
+    } catch {
+      // Private mode: the choice lasts until the tab closes.
+    }
+    setLangState(l);
+  };
+  return (
+    <LangContext.Provider value={{ lang, s: t(lang), setLang }}>
+      <App />
+    </LangContext.Provider>
+  );
+}
+
+render(<Root />, document.getElementById("app")!);
 
 // The service worker keeps the app shell available offline. Only in a
 // production build: in `vite dev` it would cache files that keep changing.

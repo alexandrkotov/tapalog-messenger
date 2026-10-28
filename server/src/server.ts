@@ -1,6 +1,13 @@
+import type { Database } from "bun:sqlite";
 import type { HealthResponse } from "@tapalog-messenger/shared";
+import { LIMITS } from "@tapalog-messenger/shared";
 import { keyMatches } from "./adminKey";
-import { renderStatusPage, type StatusInfo } from "./statusPage";
+import { createApi, inviteDto } from "./api";
+import { authenticate, originAllowed, originsFor } from "./auth";
+import { APP_CSP, error, json, text, withHeaders } from "./http";
+import { Hub, type SocketData } from "./hub";
+import { createInvite } from "./store/accounts";
+import { renderStatusPage, tunnelText, type StatusInfo } from "./statusPage";
 
 /** URL path → file the binary can read (an embedded `$bunfs` path when compiled). */
 export type AssetMap = Readonly<Record<string, string>>;
@@ -11,49 +18,36 @@ export interface ServerOptions {
   hostname?: string;
   assets: AssetMap;
   adminKey: string;
+  db: Database;
+  /** The HTTPS address the server is reachable at from outside, e.g. https://messenger.tapalog.com. */
+  publicUrl?: string | null;
+  /**
+   * Take the client IP from Cloudflare's CF-Connecting-IP header. Only when
+   * the tunnel is on: the server listens on 127.0.0.1, so every request
+   * otherwise looks like it came from this computer.
+   */
+  trustCfConnectingIp?: boolean;
   health: HealthResponse;
   status: () => StatusInfo;
   /** Called after a valid POST /shutdown has been answered. */
   onShutdownRequested?: () => void;
+  now?: () => number;
 }
 
 export interface ServerHandle {
   port: number;
+  hub: Hub;
+  /** The public address, once known (a quick tunnel only learns it after start). */
+  publicUrl(): string | null;
+  setPublicUrl(url: string): void;
   stop(): Promise<void>;
 }
 
-// The client is served from the same origin as the API, so no CORS headers
-// at all — their absence is what keeps other sites from reading responses.
-const APP_CSP = [
-  "default-src 'self'",
-  "img-src 'self' blob: data:",
-  "media-src 'self' blob:",
-  "connect-src 'self'",
-  "base-uri 'none'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-].join("; ");
-
-const COMMON_HEADERS: Record<string, string> = {
-  "X-Content-Type-Options": "nosniff",
-  "Referrer-Policy": "no-referrer",
-};
-
-function withHeaders(res: Response, headers: Record<string, string>): Response {
-  for (const [k, v] of Object.entries({ ...COMMON_HEADERS, ...headers })) res.headers.set(k, v);
-  return res;
-}
-
-function json(body: unknown, status = 200): Response {
-  return withHeaders(Response.json(body, { status }), { "Cache-Control": "no-store", "Content-Security-Policy": APP_CSP });
-}
-
-function text(body: string, status: number): Response {
-  return withHeaders(new Response(body, { status }), { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" });
-}
-
 /** Paths the client router never owns, so they never fall back to index.html. */
-const RESERVED_PREFIXES = ["/api/", "/ws", "/media/", "/healthz", "/status", "/shutdown"];
+const RESERVED_PREFIXES = ["/api/", "/ws", "/media/", "/healthz", "/status", "/shutdown", "/admin/"];
+
+/** Time clients get to hear the close frame before the listener goes away. */
+const CLOSE_GRACE_MS = 300;
 
 function serveAsset(assets: AssetMap, pathname: string, acceptsHtml: boolean): Response | null {
   let file = assets[pathname === "/" ? "/index.html" : pathname];
@@ -71,28 +65,57 @@ function serveAsset(assets: AssetMap, pathname: string, acceptsHtml: boolean): R
 }
 
 export function startServer(opts: ServerOptions): ServerHandle {
+  const now = opts.now ?? Date.now;
   const adminKeyOf = (req: Request, url: URL) => req.headers.get("X-Admin-Key") ?? url.searchParams.get("key");
+  const origins = originsFor(opts.port, opts.publicUrl ?? null);
+  const hub = new Hub(opts.db, now);
+  let port = opts.port;
+  let publicUrl = opts.publicUrl ?? null;
+  const inviteBase = () => publicUrl ?? `http://localhost:${port}`;
+  const handleApi = createApi({ db: opts.db, hub, origins, inviteBase, now });
 
-  const bunServer = Bun.serve({
+  const bunServer = Bun.serve<SocketData>({
     port: opts.port,
     hostname: opts.hostname ?? "127.0.0.1",
-    fetch(req) {
+    async fetch(req, server) {
       const url = new URL(req.url);
       const { pathname } = url;
+      const ip = () => (opts.trustCfConnectingIp && req.headers.get("CF-Connecting-IP")) || server.requestIP(req)?.address || "unknown";
 
       if (pathname === "/healthz") return json(opts.health);
 
-      if (pathname === "/status" || pathname === "/status.json" || pathname === "/shutdown") {
+      if (pathname.startsWith("/api/")) {
+        if (req.method !== "GET" && req.method !== "HEAD" && !originAllowed(req, origins)) return error("bad_origin");
+        return handleApi(req, url, ip());
+      }
+
+      if (pathname === "/ws") {
+        if (!originAllowed(req, origins)) return error("bad_origin");
+        const session = authenticate(opts.db, req, now());
+        if (!session) return error("unauthorized");
+        if (server.upgrade(req, { data: { userId: session.user.id, deviceId: session.deviceId } })) return undefined;
+        return text("Expected a WebSocket", 400);
+      }
+
+      if (pathname === "/status" || pathname === "/status.json" || pathname === "/shutdown" || pathname === "/admin/invite") {
         if (!keyMatches(opts.adminKey, adminKeyOf(req, url))) return text("Forbidden", 403);
-        if (pathname === "/status.json") return json(opts.status());
+        if (pathname === "/status.json") {
+          const st = opts.status();
+          return json({ ...st, tunnel: st.tunnel && { ...st.tunnel, text: tunnelText(st.tunnel) } });
+        }
         if (pathname === "/status") {
           const nonce = crypto.randomUUID().replaceAll("-", "");
           return withHeaders(new Response(renderStatusPage(opts.status(), nonce), { headers: { "Content-Type": "text/html; charset=utf-8" } }), {
             "Cache-Control": "no-store",
-            "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'`,
+            "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'`,
           });
         }
         if (req.method !== "POST") return text("Method Not Allowed", 405);
+        if (pathname === "/admin/invite") {
+          // The host's own invite link, from the status page: one person, valid for a week.
+          const row = createInvite(opts.db, { createdBy: null, grantsAdmin: false, maxUses: 1, expiresAt: now() + 7 * 24 * 3600 * 1000, now: now() });
+          return json(inviteDto(row, inviteBase()), 201);
+        }
         // Answer first, then stop: the caller (the Stop button) needs to hear back.
         setTimeout(() => opts.onShutdownRequested?.(), 50);
         return json({ ok: true }, 202);
@@ -104,14 +127,34 @@ export function startServer(opts: ServerOptions): ServerHandle {
       }
       return text("Not Found", 404);
     },
+    websocket: {
+      ...hub.handlers,
+      maxPayloadLength: LIMITS.frameBytes,
+      // Bun pings idle sockets itself; clients also ping every 30 s, under Cloudflare's ~100 s idle cut-off.
+      idleTimeout: 120,
+      sendPings: true,
+    },
   });
+  hub.attach(bunServer);
+  port = bunServer.port ?? opts.port;
+  // Port 0 (tests) picks a free port only now.
+  for (const origin of originsFor(port, null).allowed) origins.allowed.add(origin);
 
   let stopped = false;
   return {
-    port: bunServer.port ?? opts.port,
+    port,
+    hub,
+    publicUrl: () => publicUrl,
+    setPublicUrl(url) {
+      publicUrl = url;
+      origins.allowed.add(new URL(url).origin);
+      origins.publicHost = new URL(url).host;
+    },
     async stop() {
       if (stopped) return;
       stopped = true;
+      hub.closeAll();
+      await Bun.sleep(CLOSE_GRACE_MS);
       await bunServer.stop(true);
     },
   };

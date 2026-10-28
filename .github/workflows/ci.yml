@@ -21,12 +21,19 @@ jobs:
       - run: bun run build:client
       - run: bun run typecheck
       - run: bun run test
+      # e2e runs against the compiled binary, the thing people actually run.
+      - uses: actions/cache@v6
+        with:
+          path: vendor
+          key: cloudflared-linux-x64-${{ hashFiles('scripts/cloudflared.lock.json') }}
+      - run: bun run compile:linux-x64
       - run: bunx playwright install --with-deps chromium firefox webkit
         working-directory: e2e
       - run: npx playwright test
         working-directory: e2e
         env:
           CI: "true"
+          TM_BINARY: ${{ github.workspace }}/dist/tapalog-messenger-linux-x64
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
@@ -42,6 +49,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run build:client
+      # cloudflared is pinned by version and SHA-256 in scripts/cloudflared.lock.json.
+      - uses: actions/cache@v6
+        with:
+          path: vendor
+          key: cloudflared-all-${{ hashFiles('scripts/cloudflared.lock.json') }}
       # Bun cross-compiles every target from this one Linux machine.
       - run: |
           for target in linux-x64 linux-arm64 macos-arm64 macos-x64 windows-x64; do
@@ -88,6 +100,8 @@ jobs:
           cd "$WORK"
           chmod +x "${{ matrix.binary }}"   # artifacts do not keep the exec bit
           "./${{ matrix.binary }}" --version
+          # The embedded cloudflared comes out of the binary and runs on this OS.
+          "./${{ matrix.binary }}" --check-tunnel-binary
 
           "./${{ matrix.binary }}" --port 18443 --no-open > server.log 2>&1 &
           PID=$!
@@ -108,10 +122,21 @@ jobs:
           # With no --data, the data folder sits next to the binary.
           test -f messenger-data/messenger.db
           test -f messenger-data/admin.key
+          KEY="$(cat messenger-data/admin.key)"
+
+          # The first account, through the setup invite on the status page:
+          # password hashing and database writes work on this OS.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:18443/api/chats)" = 401
+          INVITE="$(curl -fsS -H "X-Admin-Key: $KEY" http://localhost:18443/status.json | grep -o '/invite/[A-Za-z0-9_-]*' | cut -d/ -f3)"
+          test -n "$INVITE"
+          curl -fsS -c cookies.txt -H "Content-Type: application/json" \
+            -d "{\"invite\":\"$INVITE\",\"username\":\"admin\",\"display_name\":\"Admin\",\"password\":\"smoke-test-pw\"}" \
+            http://localhost:18443/api/auth/register | grep -q '"is_admin":true'
+          curl -fsS -b cookies.txt http://localhost:18443/api/chats | grep -q '^\[\]$'
 
           # Admin routes are closed without the key and stop the server with it.
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:18443/shutdown)" = 403
-          curl -fsS -X POST -H "X-Admin-Key: $(cat messenger-data/admin.key)" http://localhost:18443/shutdown
+          curl -fsS -X POST -H "X-Admin-Key: $KEY" http://localhost:18443/shutdown
           for i in $(seq 1 10); do
             if ! curl -fsS http://localhost:18443/healthz >/dev/null 2>&1; then echo "Stopped cleanly."; exit 0; fi
             sleep 1

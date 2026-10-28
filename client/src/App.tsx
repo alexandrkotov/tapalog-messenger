@@ -1,45 +1,67 @@
-import type { HealthResponse } from "@tapalog-messenger/shared";
-import { useEffect, useState } from "preact/hooks";
-import type { Strings } from "./i18n";
+import { useEffect } from "preact/hooks";
+import { match, usePath } from "./router";
+import { boot, useAppState } from "./state";
+import { AlreadySignedIn, Login, Register } from "./ui/Auth";
+import { ChatInfo } from "./ui/ChatInfo";
+import { ChatList } from "./ui/ChatList";
+import { ChatView } from "./ui/ChatView";
+import { useS } from "./ui/common";
+import { NewChat } from "./ui/NewChat";
+import { Settings } from "./ui/Settings";
 
-type Connection = { state: "checking" } | { state: "online"; health: HealthResponse } | { state: "offline" };
+export function App() {
+  const s = useS();
+  const st = useAppState();
+  const path = usePath();
+  useEffect(() => void boot(), []);
 
-const RECHECK_MS = 5000;
+  const invite = match("/invite/:code", path);
 
-export function App({ s }: { s: Strings }) {
-  const [conn, setConn] = useState<Connection>({ state: "checking" });
+  if (st.phase === "loading") {
+    return (
+      <main class="center">
+        <h1>{s.title}</h1>
+        <p class="hint" data-testid="connection" data-state="checking">
+          {s.checking}
+        </p>
+      </main>
+    );
+  }
+  if (st.phase === "unreachable") {
+    return (
+      <main class="center">
+        <h1>{s.title}</h1>
+        <p class="warn" data-testid="connection" data-state="offline" role="status">
+          {s.offline}
+        </p>
+        <button type="button" onClick={() => void boot()}>
+          {s.retry}
+        </button>
+      </main>
+    );
+  }
+  if (st.phase === "signed-out") {
+    return <main class="center">{invite ? <Register invite={invite.code!} /> : <Login />}</main>;
+  }
+  if (invite) return <main class="center">{<AlreadySignedIn />}</main>;
 
-  useEffect(() => {
-    let cancelled = false;
-    async function check() {
-      try {
-        const res = await fetch("/healthz", { cache: "no-store" });
-        if (!res.ok) throw new Error(String(res.status));
-        const health = (await res.json()) as HealthResponse;
-        if (!cancelled) setConn({ state: "online", health });
-      } catch {
-        if (!cancelled) setConn({ state: "offline" });
-      }
-    }
-    void check();
-    const timer = setInterval(check, RECHECK_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, []);
+  // Signed in: the list on the left, the open thing on the right. On a phone only one shows.
+  const chat = match("/chat/:id", path);
+  const info = match("/chat/:id/info", path);
+  const main = chat ? (
+    <ChatView chatId={Number(chat.id)} />
+  ) : info ? (
+    <ChatInfo chatId={Number(info.id)} />
+  ) : path === "/new" ? (
+    <NewChat />
+  ) : path === "/settings" ? (
+    <Settings />
+  ) : null;
 
   return (
-    <main class="shell">
-      <h1>{s.title}</h1>
-      <p class={`conn conn-${conn.state}`} data-testid="connection" data-state={conn.state} role="status">
-        {conn.state === "checking" ? s.checking : conn.state === "online" ? s.online : s.offline}
-      </p>
-      {conn.state === "online" && (
-        <p class="meta">
-          {s.version}: {conn.health.version}
-        </p>
-      )}
+    <main class={`layout${main ? " has-main" : ""}`}>
+      <ChatList />
+      {main ?? <section class="empty-main">{s.pickChat}</section>}
     </main>
   );
 }

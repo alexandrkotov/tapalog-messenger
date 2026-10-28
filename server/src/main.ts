@@ -4,11 +4,16 @@ import { APP_ID, type HealthResponse } from "@tapalog-messenger/shared";
 import pkg from "../package.json";
 import { generateAdminKey, readAdminKey, writeAdminKey } from "./adminKey";
 import { ArgsError, parseArgs, USAGE } from "./args";
+import { inviteDto } from "./api";
 import { assets } from "./clientAssets.gen";
+import { readConfig, writeConfig, type Config } from "./config";
 import { ensureDataDir, isCompiled, resolveDataDir } from "./dataDir";
 import { openDatabase, schemaVersion } from "./db";
+import { cleanUpExtracted, cloudflaredPath } from "./embedded";
 import { openInBrowser } from "./openInBrowser";
 import { startServer, type ServerHandle } from "./server";
+import { createInvite, ensureSetupInvite } from "./store/accounts";
+import { startTunnel, type Tunnel, type TunnelMode, type TunnelState } from "./tunnel";
 
 function isPortInUse(err: unknown): boolean {
   return err instanceof Error && "code" in err && err.code === "EADDRINUSE";
@@ -23,6 +28,15 @@ async function isOwnServer(port: number): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** CI: proves the embedded cloudflared comes out of the binary and runs on this OS. */
+async function checkTunnelBinary(): Promise<number> {
+  const path = await cloudflaredPath();
+  const proc = Bun.spawnSync([path, "--version"], { windowsHide: true });
+  console.log(`${path}: ${proc.stdout.toString().trim() || proc.stderr.toString().trim()}`);
+  cleanUpExtracted();
+  return proc.exitCode === 0 ? 0 : 1;
 }
 
 async function main(): Promise<number> {
@@ -42,10 +56,45 @@ async function main(): Promise<number> {
     console.log(pkg.version);
     return 0;
   }
+  if (args.checkTunnelBinary) return checkTunnelBinary();
 
   console.log(`Tapalog Messenger ${pkg.version}`);
   const dataDir = resolveDataDir({ flag: args.data, execPath: process.execPath, compiled: isCompiled(), cwd: process.cwd(), home: homedir() });
   ensureDataDir(dataDir);
+
+  let config: Config;
+  try {
+    config = readConfig(dataDir);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : err);
+    return 1;
+  }
+  // Flags given once are remembered, so the next start can be a plain double-click.
+  const previousUrl = config.public_url ?? null;
+  const next: Config = { ...config };
+  if (args.publicUrl) next.public_url = args.publicUrl;
+  if (args.tunnelToken) next.tunnel_token = args.tunnelToken;
+  if (args.forgetTunnel) delete next.tunnel_token;
+  if (JSON.stringify(next) !== JSON.stringify(config)) {
+    writeConfig(dataDir, next);
+    config = next;
+  }
+  if (args.forgetTunnel) console.log("  Tunnel token deleted.");
+
+  const tunnelMode: TunnelMode | null = args.quickTunnel
+    ? { kind: "quick" }
+    : config.tunnel_token && !args.noTunnel && !args.forgetTunnel
+      ? { kind: "named", token: config.tunnel_token }
+      : null;
+  if (tunnelMode?.kind === "named" && !config.public_url) {
+    console.error("The tunnel needs its address once: start with --public-url https://<the tunnel's hostname>, e.g. https://messenger.tapalog.com");
+    return 2;
+  }
+  // A quick tunnel's address is only known once it connects.
+  const initialPublicUrl = tunnelMode?.kind === "quick" ? null : (config.public_url ?? null);
+  // Installed apps, sign-ins and notifications are tied to the address; say so when it moves.
+  const addressChangedFrom = args.publicUrl && previousUrl && previousUrl !== args.publicUrl ? previousUrl : null;
+
   let db: Database;
   try {
     db = openDatabase(dataDir);
@@ -63,14 +112,33 @@ async function main(): Promise<number> {
   const localUrl = `http://localhost:${args.port}`;
   const startedAt = new Date().toISOString();
   let server: ServerHandle;
+  let tunnel: Tunnel | null = null;
+  let tunnelState: TunnelState | null = null;
+  const inviteBase = () => server.publicUrl() ?? localUrl;
   const adminKey = generateAdminKey();
   try {
     server = startServer({
       port: args.port,
       assets,
       adminKey,
+      db,
+      publicUrl: initialPublicUrl,
+      trustCfConnectingIp: tunnelMode !== null,
       health: { app: APP_ID, ok: true, version: pkg.version, schema },
-      status: () => ({ version: pkg.version, schema, localUrl, dataDir, startedAt }),
+      status: () => {
+        const setup = ensureSetupInvite(db, Date.now());
+        return {
+          version: pkg.version,
+          schema,
+          localUrl,
+          publicUrl: server.publicUrl(),
+          setupInviteUrl: setup && inviteDto(setup, inviteBase()).url,
+          tunnel: tunnelMode && { kind: tunnelMode.kind, ...(tunnelState ?? { state: "starting" as const }) },
+          addressChangedFrom,
+          dataDir,
+          startedAt,
+        };
+      },
       onShutdownRequested: () => shutdown(),
     });
   } catch (err) {
@@ -91,18 +159,49 @@ async function main(): Promise<number> {
   writeAdminKey(dataDir, adminKey);
   const statusUrl = `${localUrl}/status?key=${adminKey}`;
   console.log(`  Local: ${localUrl}`);
+  if (server.publicUrl()) console.log(`  Public: ${server.publicUrl()}`);
+  if (addressChangedFrom) console.log(`  The public address changed from ${addressChangedFrom}: installed apps and notifications must be set up again.`);
+  const setup = ensureSetupInvite(db, Date.now());
+  if (setup) console.log(`  Create the first account (admin): ${inviteDto(setup, inviteBase()).url}`);
+  if (args.invite) {
+    const row = createInvite(db, { createdBy: null, grantsAdmin: true, maxUses: 1, expiresAt: Date.now() + 24 * 3600 * 1000, now: Date.now() });
+    console.log(`  Admin invite, one use, valid 24 hours: ${inviteDto(row, inviteBase()).url}`);
+  }
   console.log(`  Status page (keep this link private): ${statusUrl}`);
   if (args.open) openInBrowser(statusUrl);
+
+  if (tunnelMode) {
+    if (tunnelMode.kind === "quick") console.log("  Quick tunnel: a new address on every start. For a demo only; installed apps will not survive a restart.");
+    const cloudflared = await cloudflaredPath();
+    let lastLine = "";
+    tunnel = startTunnel({
+      cloudflared,
+      mode: tunnelMode,
+      localUrl,
+      onState: (s) => {
+        tunnelState = s;
+        if (s.state === "connected" && s.url) server.setPublicUrl(s.url);
+        const line = s.state === "connected" ? `  Tunnel connected: ${server.publicUrl()}` : s.state === "down" ? `  Tunnel down: ${s.message}` : "";
+        if (line && line !== lastLine) console.log(line);
+        lastLine = line;
+      },
+    });
+  }
 
   let stopping = false;
   function shutdown() {
     if (stopping) return;
     stopping = true;
     console.log("Shutting down…");
-    void server.stop().then(() => {
-      db.close();
-      process.exit(0);
-    });
+    // The server first, so clients hear "going away" while the tunnel still carries it.
+    void server
+      .stop()
+      .then(() => tunnel?.stop())
+      .then(() => {
+        db.close();
+        cleanUpExtracted();
+        process.exit(0);
+      });
   }
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);

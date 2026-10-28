@@ -1,8 +1,10 @@
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { APP_ID } from "@tapalog-messenger/shared";
+import { migrate } from "../src/db";
 import { startServer, type ServerHandle } from "../src/server";
 
 const KEY = "k".repeat(64);
@@ -20,13 +22,18 @@ beforeAll(() => {
   server = startServer({
     port: 0,
     adminKey: KEY,
+    db: (() => {
+      const db = new Database(":memory:", { strict: true });
+      migrate(db);
+      return db;
+    })(),
     assets: {
       "/index.html": file("index.html", "<!doctype html><title>shell</title>"),
       "/assets/app-abc.js": file("app-abc.js", "console.log(1)"),
       "/sw.js": file("sw.js", "// sw"),
     },
     health: { app: APP_ID, ok: true, version: "1.2.3", schema: 1 },
-    status: () => ({ version: "1.2.3", schema: 1, localUrl: "http://localhost", dataDir: "/data", startedAt: "now" }),
+    status: () => ({ version: "1.2.3", schema: 1, localUrl: "http://localhost", publicUrl: null, setupInviteUrl: null, tunnel: null, addressChangedFrom: null, dataDir: "/data", startedAt: "now" }),
     onShutdownRequested: () => shutdownCalls++,
   });
   base = `http://localhost:${server.port}`;
@@ -70,7 +77,7 @@ describe("server", () => {
     expect(await (await fetch(`${base}/`, { headers: html })).text()).toContain("shell");
     expect(await (await fetch(`${base}/chat/42`, { headers: html })).text()).toContain("shell");
     expect((await fetch(`${base}/missing.js`, { headers: html })).status).toBe(404);
-    expect((await fetch(`${base}/api/nothing`, { headers: html })).status).toBe(404);
+    expect((await fetch(`${base}/api/nothing`, { headers: html })).status).toBe(401); // needs a session; never the shell
     expect((await fetch(`${base}/chat/42`)).status).toBe(404); // not a browser navigation
   });
 
