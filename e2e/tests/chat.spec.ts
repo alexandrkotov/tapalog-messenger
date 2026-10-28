@@ -23,6 +23,23 @@ test("Alice writes to Bob; Bob sees it; Alice's ticks turn to read", async ({ br
   await expect(bodies(alice)).toHaveText(["Hello, Bob", "Hi Alice"]);
 });
 
+test("on a phone the chat fits the screen and typing does not zoom it", async ({ browser }) => {
+  const alice = await signUp(browser, "Alice");
+  const bob = await signUp(browser, "Bob");
+  await alice.page.setViewportSize({ width: 390, height: 844 });
+  await startChat(alice, bob);
+  await send(alice, "Привет! Как дела? Пишу тебе с телефона, и это сообщение длиннее ширины экрана");
+  await expect(bodies(alice)).toHaveCount(1);
+
+  // iOS zooms the page when a focused field's text is under 16px, and keeps it zoomed (seen live).
+  const sizes = await alice.page.locator("input, textarea, select").evaluateAll((els) => els.map((el) => parseFloat(getComputedStyle(el).fontSize)));
+  expect(sizes.length).toBeGreaterThan(0);
+  for (const size of sizes) expect(size).toBeGreaterThanOrEqual(16);
+  const overflow = await alice.page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBe(0);
+  await expect(alice.page.getByTestId("message-body").last()).toBeInViewport({ ratio: 1 });
+});
+
 test("a group of three sees every message in the same order", async ({ browser }) => {
   const [alice, bob, carol] = [await signUp(browser, "Alice"), await signUp(browser, "Bob"), await signUp(browser, "Carol")];
   await alice.page.getByTestId("new-chat").click();

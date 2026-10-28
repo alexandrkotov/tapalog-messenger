@@ -78,6 +78,8 @@ input,
 textarea,
 select {
   width: 100%;
+  /* Below 16px iOS zooms the page on focus and leaves it zoomed (seen live). */
+  font-size: 16px;
   padding: 9px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
