@@ -1,0 +1,22 @@
+{
+  "name": "tapalog-messenger",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "workspaces": ["server", "client", "shared", "e2e"],
+  "scripts": {
+    "build:client": "bun run --cwd client build && bun scripts/gen-client-assets.ts",
+    "dev": "bun run build:client && bun server/src/main.ts",
+    "typecheck": "tsc -p server && tsc -p client && tsc -p e2e",
+    "test": "bun test server",
+    "e2e": "bun run --cwd e2e test",
+    "compile:linux-x64": "bun build --compile --target=bun-linux-x64 server/src/main.ts --outfile dist/tapalog-messenger-linux-x64",
+    "compile:linux-arm64": "bun build --compile --target=bun-linux-arm64 server/src/main.ts --outfile dist/tapalog-messenger-linux-arm64",
+    "compile:macos-arm64": "bun build --compile --target=bun-darwin-arm64 server/src/main.ts --outfile dist/tapalog-messenger-macos-arm64",
+    "compile:macos-x64": "bun build --compile --target=bun-darwin-x64 server/src/main.ts --outfile dist/tapalog-messenger-macos-x64",
+    "compile:windows-x64": "bun build --compile --target=bun-windows-x64 --windows-hide-console server/src/main.ts --outfile dist/tapalog-messenger-windows-x64.exe"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,49 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9;
+  --text: #16181d;
+  --muted: #5d6470;
+  --ok: #1a7f64;
+  --warn: #a15c07;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111317;
+    --text: #eceef2;
+    --muted: #9aa1ad;
+    --ok: #3dbb93;
+    --warn: #e0a24a;
+  }
+}
+body {
+  margin: 0;
+  font: 16px/1.5 system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+.shell {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 48px 16px;
+}
+h1 {
+  font-size: 24px;
+  margin: 0 0 8px;
+}
+.conn {
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+.conn-checking {
+  color: var(--muted);
+}
+.conn-online {
+  color: var(--ok);
+}
+.conn-offline {
+  color: var(--warn);
+}
+.meta {
+  color: var(--muted);
+  margin: 0;
+}

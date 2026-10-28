@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: Typecheck, unit tests, e2e (Chromium, Firefox, WebKit)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      # Playwright's test runner is supported on Node, so the e2e step runs under it.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun run build:client
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bunx playwright install --with-deps chromium firefox webkit
+        working-directory: e2e
+      - run: npx playwright test
+        working-directory: e2e
+        env:
+          CI: "true"
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report
+          path: e2e/playwright-report
+          retention-days: 7
+
+  compile:
+    name: Compile all five binaries
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run build:client
+      # Bun cross-compiles every target from this one Linux machine.
+      - run: |
+          for target in linux-x64 linux-arm64 macos-arm64 macos-x64 windows-x64; do
+            bun run compile:$target
+          done
+      - run: ls -la dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binaries
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # Each binary started for real on its own OS: from a fresh temp folder, with
+  # nothing else installed. Public repo, so the Windows and macOS runners are free.
+  smoke:
+    name: Smoke test on ${{ matrix.os }}
+    needs: compile
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            binary: tapalog-messenger-linux-x64
+          - os: windows-latest
+            binary: tapalog-messenger-windows-x64.exe
+          - os: macos-14
+            binary: tapalog-messenger-macos-arm64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: binaries
+          path: dist
+      - name: Start the binary, check it serves the app, stop it with the admin key
+        run: |
+          set -u
+          WORK="$RUNNER_TEMP/tm-smoke"
+          mkdir -p "$WORK"
+          cp "dist/${{ matrix.binary }}" "$WORK/"
+          cd "$WORK"
+          chmod +x "${{ matrix.binary }}"   # artifacts do not keep the exec bit
+          "./${{ matrix.binary }}" --version
+
+          "./${{ matrix.binary }}" --port 18443 --no-open > server.log 2>&1 &
+          PID=$!
+          ok=false
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:18443/healthz -o health.json 2>/dev/null; then ok=true; break; fi
+            sleep 1
+          done
+          cat server.log || true
+          if [ "$ok" != true ]; then echo "::error::/healthz never answered"; kill "$PID" 2>/dev/null; exit 1; fi
+          cat health.json; echo
+          grep -q '"app":"tapalog-messenger"' health.json
+
+          # The embedded client is served and links its manifest.
+          curl -fsS -H "Accept: text/html" http://localhost:18443/ | grep -q 'rel="manifest"'
+          curl -fsS http://localhost:18443/manifest.webmanifest | grep -q '"Tapalog Messenger"'
+
+          # With no --data, the data folder sits next to the binary.
+          test -f messenger-data/messenger.db
+          test -f messenger-data/admin.key
+
+          # Admin routes are closed without the key and stop the server with it.
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:18443/shutdown)" = 403
+          curl -fsS -X POST -H "X-Admin-Key: $(cat messenger-data/admin.key)" http://localhost:18443/shutdown
+          for i in $(seq 1 10); do
+            if ! curl -fsS http://localhost:18443/healthz >/dev/null 2>&1; then echo "Stopped cleanly."; exit 0; fi
+            sleep 1
+          done
+          echo "::error::server still answering after /shutdown"
+          kill "$PID" 2>/dev/null
+          exit 1
