@@ -3,10 +3,12 @@ import type { HealthResponse } from "@tapalog-messenger/shared";
 import { LIMITS } from "@tapalog-messenger/shared";
 import { keyMatches } from "./adminKey";
 import { createApi, inviteDto } from "./api";
+import { createFiles } from "./files";
 import { authenticate, originAllowed, originsFor } from "./auth";
 import { APP_CSP, error, json, text, withHeaders } from "./http";
 import { Hub, type SocketData } from "./hub";
 import { createInvite } from "./store/accounts";
+import { collectGarbage } from "./store/media";
 import { renderStatusPage, tunnelText, type StatusInfo } from "./statusPage";
 
 /** URL path → file the binary can read (an embedded `$bunfs` path when compiled). */
@@ -19,6 +21,8 @@ export interface ServerOptions {
   assets: AssetMap;
   adminKey: string;
   db: Database;
+  /** Where uploads are stored: messenger-data/media. */
+  mediaDir: string;
   /** The HTTPS address the server is reachable at from outside, e.g. https://messenger.tapalog.com. */
   publicUrl?: string | null;
   /**
@@ -49,6 +53,8 @@ const RESERVED_PREFIXES = ["/api/", "/ws", "/media/", "/healthz", "/status", "/s
 /** Time clients get to hear the close frame before the listener goes away. */
 const CLOSE_GRACE_MS = 300;
 
+const GARBAGE_EVERY_MS = 3600 * 1000;
+
 function serveAsset(assets: AssetMap, pathname: string, acceptsHtml: boolean): Response | null {
   let file = assets[pathname === "/" ? "/index.html" : pathname];
   if (!file) {
@@ -72,11 +78,23 @@ export function startServer(opts: ServerOptions): ServerHandle {
   let port = opts.port;
   let publicUrl = opts.publicUrl ?? null;
   const inviteBase = () => publicUrl ?? `http://localhost:${port}`;
-  const handleApi = createApi({ db: opts.db, hub, origins, inviteBase, now });
+  const files = createFiles({ db: opts.db, mediaDir: opts.mediaDir, now });
+  const handleApi = createApi({ db: opts.db, hub, files, origins, inviteBase, now });
+  const sweep = () => {
+    try {
+      collectGarbage(opts.db, opts.mediaDir, now());
+    } catch (err) {
+      console.error(`  Cleaning up unused files failed: ${err instanceof Error ? err.message : err}`);
+    }
+  };
+  sweep();
+  const sweepTimer = setInterval(sweep, GARBAGE_EVERY_MS);
 
   const bunServer = Bun.serve<SocketData>({
     port: opts.port,
     hostname: opts.hostname ?? "127.0.0.1",
+    // Uploads stream to disk with their own limit; this only stops a body far beyond it.
+    maxRequestBodySize: LIMITS.fileBytes + 1024 * 1024,
     async fetch(req, server) {
       const url = new URL(req.url);
       const { pathname } = url;
@@ -87,6 +105,10 @@ export function startServer(opts: ServerOptions): ServerHandle {
       if (pathname.startsWith("/api/")) {
         if (req.method !== "GET" && req.method !== "HEAD" && !originAllowed(req, origins)) return error("bad_origin");
         return handleApi(req, url, ip());
+      }
+
+      if (pathname.startsWith("/media/") && (req.method === "GET" || req.method === "HEAD")) {
+        return files.serve(req, url, authenticate(opts.db, req, now()));
       }
 
       if (pathname === "/ws") {
@@ -153,6 +175,7 @@ export function startServer(opts: ServerOptions): ServerHandle {
     async stop() {
       if (stopped) return;
       stopped = true;
+      clearInterval(sweepTimer);
       hub.closeAll();
       await Bun.sleep(CLOSE_GRACE_MS);
       await bunServer.stop(true);

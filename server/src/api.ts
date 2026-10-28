@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { LIMITS, USERNAME_RE, type InviteDto, type MeDto } from "@tapalog-messenger/shared";
 import { authenticate, clearSessionCookie, sessionCookie, type Origins, type Session } from "./auth";
+import type { createFiles } from "./files";
 import { error, json, RateLimiter, readJson } from "./http";
 import type { Hub } from "./hub";
 import * as accounts from "./store/accounts";
@@ -11,6 +12,7 @@ import * as chats from "./store/chats";
 export interface ApiContext {
   db: Database;
   hub: Hub;
+  files: ReturnType<typeof createFiles>;
   origins: Origins;
   /** Base for invite links: the public address if there is one, else the local one. */
   inviteBase: () => string;
@@ -216,6 +218,8 @@ export function createApi(ctx: ApiContext) {
       return isId(chatId) ? chatRoute(req, url, s, chatId, parts.slice(2)) : error("not_found");
     }
     if (parts[0] === "invites" && parts.length <= 2) return invites(req, s, parts[1]);
+    if (route === "media" && req.method === "POST") return ctx.files.upload(req, url, s);
+    if (parts[0] === "media" && parts[2] === "thumb" && parts.length === 3 && req.method === "PUT") return ctx.files.putThumb(req, parts[1]!, s);
     return error("not_found");
   };
 }

@@ -385,7 +385,7 @@ function onFrame(f: ServerFrame) {
       state.outbox.splice(i, 1);
       // Shown as sent right away; the msg.new that follows replaces it with the stored copy.
       onMessage(
-        { chat: f.chat, seq: f.seq, client_id: p.client_id, from: myId(), kind: "text", body: p.body, reply_to: p.reply_to ?? null, at: f.at, edited_at: null, deleted: false, version: 0, reactions: {} },
+        { chat: f.chat, seq: f.seq, client_id: p.client_id, from: myId(), kind: "text", body: p.body, media: null, reply_to: p.reply_to ?? null, at: f.at, edited_at: null, deleted: false, version: 0, reactions: {} },
         false,
       );
       break;

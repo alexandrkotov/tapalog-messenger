@@ -1,4 +1,7 @@
 import { Database } from "bun:sqlite";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { APP_ID, type ServerFrame } from "@tapalog-messenger/shared";
 import { migrate } from "../src/db";
 import { startServer, type ServerHandle } from "../src/server";
@@ -13,11 +16,12 @@ export function testServer(opts: { publicUrl?: string; trustCfConnectingIp?: boo
     port: 0,
     adminKey: "k".repeat(64),
     db,
+    mediaDir: mkdtempSync(join(tmpdir(), "tm-media-")),
     assets: {},
     publicUrl: opts.publicUrl ?? null,
     trustCfConnectingIp: opts.trustCfConnectingIp,
-    health: { app: APP_ID, ok: true, version: "0", schema: 2 },
-    status: () => ({ version: "0", schema: 2, localUrl: "", publicUrl: null, setupInviteUrl: null, tunnel: null, addressChangedFrom: null, dataDir: "", startedAt: "" }),
+    health: { app: APP_ID, ok: true, version: "0", schema: 3 },
+    status: () => ({ version: "0", schema: 3, localUrl: "", publicUrl: null, setupInviteUrl: null, tunnel: null, addressChangedFrom: null, dataDir: "", startedAt: "" }),
   });
   const base = `http://localhost:${server.port}`;
   const invite = (grantsAdmin = false) => createInvite(db, { createdBy: null, grantsAdmin, maxUses: 1, expiresAt: null, now: Date.now() }).code;

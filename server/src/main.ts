@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { APP_ID, type HealthResponse } from "@tapalog-messenger/shared";
 import pkg from "../package.json";
 import { generateAdminKey, readAdminKey, writeAdminKey } from "./adminKey";
@@ -122,6 +123,7 @@ async function main(): Promise<number> {
       assets,
       adminKey,
       db,
+      mediaDir: join(dataDir, "media"),
       publicUrl: initialPublicUrl,
       trustCfConnectingIp: tunnelMode !== null,
       health: { app: APP_ID, ok: true, version: pkg.version, schema },

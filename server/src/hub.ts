@@ -132,7 +132,16 @@ export class Hub {
 
       case "msg.send": {
         if (!this.sends.hit(String(userId), now)) return send({ t: "error", code: "rate_limited", ref: f.client_id });
-        const res = chats.sendMessage(this.db, { chatId: f.chat, sender: userId, clientId: f.client_id, body: f.body, replyTo: f.reply_to, now });
+        const res = chats.sendMessage(this.db, {
+          chatId: f.chat,
+          sender: userId,
+          clientId: f.client_id,
+          kind: f.kind,
+          body: f.body,
+          mediaId: f.media,
+          replyTo: f.reply_to,
+          now,
+        });
         if (typeof res === "string") return send({ t: "error", code: res === "bad_request" ? "bad_request" : "forbidden", ref: f.client_id });
         send({ t: "msg.ack", client_id: f.client_id, chat: f.chat, seq: res.msg.seq, at: res.msg.at });
         if (!res.duplicate) this.publish(chats.memberIds(this.db, f.chat), { t: "msg.new", msg: res.msg });

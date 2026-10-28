@@ -20,7 +20,23 @@ export const LIMITS = {
   emoji: 16,
   /** Messages per page of history. */
   pageMax: 100,
+  /** Bytes in one uploaded file. Cloudflare's free plan passes request bodies up to 100 MB. */
+  fileBytes: 50 * 1024 * 1024,
+  /** Bytes in a photo preview made by the client. */
+  thumbBytes: 256 * 1024,
+  /** Bytes one person may upload per hour: the server is someone's home computer. */
+  uploadBytesPerHour: 200 * 1024 * 1024,
+  fileName: 255,
+  /** Points in a voice message's loudness bar. */
+  waveformPoints: 100,
+  /** Longest voice message, ms. */
+  voiceMs: 15 * 60 * 1000,
 } as const;
+
+/** Types a browser may show in place. Anything else is served as a download, so an uploaded page or SVG never runs on our address. */
+export const INLINE_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
+
+export type MessageKind = "text" | "image" | "file" | "voice";
 
 export const USERNAME_RE = /^[a-z0-9_.]{3,32}$/;
 
@@ -40,15 +56,32 @@ export interface MemberDto extends UserDto {
   last_seen_at: number | null;
 }
 
+/** An uploaded file as messages carry it. */
+export interface MediaDto {
+  id: string;
+  mime: string;
+  size: number;
+  name: string;
+  width: number | null;
+  height: number | null;
+  duration_ms: number | null;
+  /** Voice: loudness levels 0–100. */
+  waveform: number[] | null;
+  /** Whether GET /media/{id}/thumb has a small preview. */
+  thumb: boolean;
+}
+
 export interface MessageDto {
   chat: number;
   seq: number;
   client_id: string;
   /** null when the sender's account was deleted. */
   from: number | null;
-  kind: "text";
-  /** Empty once deleted. */
+  kind: MessageKind;
+  /** The text, or a photo's caption (may be empty). Empty once deleted. */
   body: string;
+  /** The photo, file or voice recording; null for text and once deleted. */
+  media: MediaDto | null;
   reply_to: number | null;
   at: number;
   edited_at: number | null;
@@ -144,7 +177,8 @@ export interface ErrorResponse {
 export type ClientFrame =
   /** First frame after connecting: the chat versions this client already has. */
   | { t: "hello"; sync: Record<string, number> }
-  | { t: "msg.send"; chat: number; client_id: string; kind: "text"; body: string; reply_to?: number }
+  /** `media` is the id POST /api/media returned; text needs a body, the other kinds may leave it empty. */
+  | { t: "msg.send"; chat: number; client_id: string; kind: MessageKind; body: string; media?: string; reply_to?: number }
   | { t: "msg.edit"; chat: number; seq: number; body: string }
   | { t: "msg.delete"; chat: number; seq: number }
   | { t: "receipt"; chat: number; delivered?: number; read?: number }
@@ -175,6 +209,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const isId = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v > 0;
 const isSeq = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 const isBody = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0 && v.length <= LIMITS.body;
+const isCaption = (v: unknown): v is string => typeof v === "string" && v.length <= LIMITS.body;
+const KINDS: readonly unknown[] = ["text", "image", "file", "voice"] satisfies MessageKind[];
+export const MEDIA_ID_RE = /^[A-Za-z0-9_-]{22}$/;
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** The frame if it is well-formed, otherwise null. Unknown extra fields are dropped. */
@@ -191,10 +228,23 @@ export function parseClientFrame(raw: unknown): ClientFrame | null {
       }
       return { t: "hello", sync };
     }
-    case "msg.send":
-      if (!isId(f.chat) || typeof f.client_id !== "string" || !UUID_RE.test(f.client_id) || f.kind !== "text" || !isBody(f.body)) return null;
+    case "msg.send": {
+      if (!isId(f.chat) || typeof f.client_id !== "string" || !UUID_RE.test(f.client_id) || !KINDS.includes(f.kind)) return null;
+      const kind = f.kind as MessageKind;
+      if (typeof f.body !== "string") return null;
+      const body = f.body;
+      if (kind === "text" ? !isBody(body) || f.media !== undefined : !isCaption(body) || typeof f.media !== "string" || !MEDIA_ID_RE.test(f.media)) return null;
       if (f.reply_to !== undefined && !isId(f.reply_to)) return null;
-      return { t: "msg.send", chat: f.chat, client_id: f.client_id.toLowerCase(), kind: "text", body: f.body, ...(f.reply_to !== undefined && { reply_to: f.reply_to }) };
+      return {
+        t: "msg.send",
+        chat: f.chat,
+        client_id: f.client_id.toLowerCase(),
+        kind,
+        body: kind === "text" ? body : body.trim(),
+        ...(kind !== "text" && { media: f.media as string }),
+        ...(f.reply_to !== undefined && { reply_to: f.reply_to }),
+      };
+    }
     case "msg.edit":
       return isId(f.chat) && isId(f.seq) && isBody(f.body) ? { t: "msg.edit", chat: f.chat, seq: f.seq, body: f.body } : null;
     case "msg.delete":

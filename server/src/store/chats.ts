@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
-import { LIMITS, type ChatDto, type MemberDto, type MessageDto } from "@tapalog-messenger/shared";
+import { INLINE_IMAGE_TYPES, LIMITS, type ChatDto, type MemberDto, type MessageDto, type MessageKind } from "@tapalog-messenger/shared";
+import { getMedia, mediaDto, type MediaRow } from "./media";
 
 /**
  * Chats, members, messages and reactions. Every change to a chat's messages
@@ -15,8 +16,9 @@ interface MessageRow {
   seq: number;
   client_id: string;
   sender_id: number | null;
-  kind: "text";
+  kind: MessageKind;
   body: string;
+  media_id: string | null;
   reply_to_seq: number | null;
   created_at: number;
   edited_at: number | null;
@@ -52,6 +54,12 @@ function withReactions(db: Database, rows: MessageRow[]): MessageDto[] {
     (map[r.emoji] ??= []).push(r.user_id);
     bySeq.set(r.seq, map);
   }
+  const mediaIds = [...new Set(rows.map((r) => r.media_id).filter((id): id is string => id !== null))];
+  const media = new Map<string, MediaRow>();
+  if (mediaIds.length) {
+    const found = db.query(`SELECT * FROM media WHERE id IN (${mediaIds.map(() => "?").join(",")})`).all(...mediaIds) as MediaRow[];
+    for (const m of found) media.set(m.id, m);
+  }
   return rows.map((r) => ({
     chat: r.chat_id,
     seq: r.seq,
@@ -59,6 +67,7 @@ function withReactions(db: Database, rows: MessageRow[]): MessageDto[] {
     from: r.sender_id,
     kind: r.kind,
     body: r.deleted_at === null ? r.body : "",
+    media: r.deleted_at === null && r.media_id !== null && media.has(r.media_id) ? mediaDto(media.get(r.media_id)!) : null,
     reply_to: r.reply_to_seq,
     at: r.created_at,
     edited_at: r.edited_at,
@@ -246,14 +255,24 @@ export function renameGroup(db: Database, chatId: number, actor: number, title: 
 
 // ---- Messages -------------------------------------------------------------
 
+/** Whether an upload can travel as this kind of message: only the uploader sends it, and a photo or voice message must really be one. */
+function mediaFits(media: MediaRow | null, kind: MessageKind, sender: number): boolean {
+  if (kind === "text") return media === null;
+  if (!media || media.owner_id !== sender) return false;
+  if (kind === "image") return (INLINE_IMAGE_TYPES as readonly string[]).includes(media.mime);
+  if (kind === "voice") return media.mime.startsWith("audio/");
+  return true;
+}
+
 /**
  * Writes a message with the chat's next seq. A resend with a client_id this
  * chat already has returns the stored message and `duplicate: true` instead.
  */
 export function sendMessage(
   db: Database,
-  m: { chatId: number; sender: number; clientId: string; body: string; replyTo?: number; now: number },
+  m: { chatId: number; sender: number; clientId: string; kind?: MessageKind; body: string; mediaId?: string; replyTo?: number; now: number },
 ): { msg: MessageDto; duplicate: boolean } | Refusal {
+  const kind = m.kind ?? "text";
   return db.transaction(() => {
     if (!memberRole(db, m.chatId, m.sender)) return "forbidden" as const;
     const existing = db
@@ -267,13 +286,14 @@ export function sendMessage(
       const { last_seq } = db.query("SELECT last_seq FROM chats WHERE id = $chatId").get({ chatId: m.chatId }) as { last_seq: number };
       if (m.replyTo > last_seq) return "bad_request" as const;
     }
+    if (!mediaFits(m.mediaId === undefined ? null : getMedia(db, m.mediaId), kind, m.sender)) return "bad_request" as const;
     const { last_seq: seq, version } = db
       .query("UPDATE chats SET last_seq = last_seq + 1, version = version + 1 WHERE id = $chatId RETURNING last_seq, version")
       .get({ chatId: m.chatId }) as { last_seq: number; version: number };
     db.query(
-      `INSERT INTO messages (chat_id, seq, client_id, sender_id, kind, body, reply_to_seq, created_at, version)
-       VALUES ($chatId, $seq, $clientId, $sender, 'text', $body, $replyTo, $now, $version)`,
-    ).run({ chatId: m.chatId, seq, clientId: m.clientId, sender: m.sender, body: m.body, replyTo: m.replyTo ?? null, now: m.now, version });
+      `INSERT INTO messages (chat_id, seq, client_id, sender_id, kind, body, media_id, reply_to_seq, created_at, version)
+       VALUES ($chatId, $seq, $clientId, $sender, $kind, $body, $mediaId, $replyTo, $now, $version)`,
+    ).run({ chatId: m.chatId, seq, clientId: m.clientId, sender: m.sender, kind, body: m.body, mediaId: m.mediaId ?? null, replyTo: m.replyTo ?? null, now: m.now, version });
     // The sender has obviously read and received everything up to their own message.
     db.query("UPDATE chat_members SET delivered_seq = $seq, read_seq = $seq WHERE chat_id = $chatId AND user_id = $sender").run({
       chatId: m.chatId,
@@ -305,7 +325,11 @@ export function editMessage(db: Database, chatId: number, seq: number, userId: n
   })();
 }
 
-/** Delete for everyone: the sender, or a group admin. The text is wiped, the slot stays. */
+/**
+ * Delete for everyone: the sender, or a group admin. The text is wiped and
+ * the file let go (it is deleted from disk once nothing else uses it); the
+ * slot stays.
+ */
 export function deleteMessage(db: Database, chatId: number, seq: number, userId: number, now: number): MessageDto | Refusal {
   return db.transaction(() => {
     const role = memberRole(db, chatId, userId);
@@ -317,7 +341,7 @@ export function deleteMessage(db: Database, chatId: number, seq: number, userId:
     if (!row || row.deleted_at !== null) return "not_found" as const;
     if (row.sender_id !== userId && !(role === "admin" && isGroup(db, chatId))) return "forbidden" as const;
     const version = bumpVersion(db, chatId);
-    db.query("UPDATE messages SET body = '', deleted_at = $now, version = $version WHERE chat_id = $chatId AND seq = $seq").run({
+    db.query("UPDATE messages SET body = '', media_id = NULL, deleted_at = $now, version = $version WHERE chat_id = $chatId AND seq = $seq").run({
       chatId,
       seq,
       now,

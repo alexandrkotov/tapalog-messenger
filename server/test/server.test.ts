@@ -27,6 +27,7 @@ beforeAll(() => {
       migrate(db);
       return db;
     })(),
+    mediaDir: join(dir, "media"),
     assets: {
       "/index.html": file("index.html", "<!doctype html><title>shell</title>"),
       "/assets/app-abc.js": file("app-abc.js", "console.log(1)"),
