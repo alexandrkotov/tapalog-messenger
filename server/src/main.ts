@@ -149,7 +149,7 @@ async function main(): Promise<number> {
       // Its key is the one it wrote last, unless it uses another data folder.
       console.log(`  Already running on port ${args.port}; opening its status page.`);
       const key = readAdminKey(dataDir);
-      if (args.open) openInBrowser(key ? `${localUrl}/status?key=${key}` : localUrl);
+      if (args.open) await openInBrowser(key ? `${localUrl}/status?key=${key}` : localUrl);
       return 0;
     }
     console.error(`  Port ${args.port} is used by another program. Start with --port <n> to pick a different one.`);
@@ -168,7 +168,7 @@ async function main(): Promise<number> {
     console.log(`  Admin invite, one use, valid 24 hours: ${inviteDto(row, inviteBase()).url}`);
   }
   console.log(`  Status page (keep this link private): ${statusUrl}`);
-  if (args.open) openInBrowser(statusUrl);
+  if (args.open) void openInBrowser(statusUrl);
 
   if (tunnelMode) {
     if (tunnelMode.kind === "quick") console.log("  Quick tunnel: a new address on every start. For a demo only; installed apps will not survive a restart.");
