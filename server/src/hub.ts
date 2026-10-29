@@ -43,6 +43,8 @@ export class Hub {
   }
 
   isOnline = (userId: number): boolean => this.sockets.has(userId);
+  /** Whether this one device of the user has the app open. */
+  isDeviceOnline = (userId: number, deviceId: number): boolean => [...(this.sockets.get(userId) ?? [])].some((ws) => ws.data.deviceId === deviceId);
 
   /** Sends a frame to every open tab of these users. */
   publish(userIds: Iterable<number>, frame: ServerFrame) {

@@ -163,7 +163,18 @@ describe("notifications", () => {
     expect(JSON.parse(decrypt(push!.body, browser))).toMatchObject({ chat: group, chat_title: "Family" });
   });
 
-  it("stays quiet for the sender, for members with the app open, and for muted chats", async () => {
+  it("wakes each device that has the app closed, even while another one has it open", async () => {
+    const { alice, bob, chat, endpoint } = await pair();
+    // Bob's phone (the subscription above) is in his pocket; his computer has the chat open.
+    const computer = new Client(t.base);
+    const login = await computer.call("POST", "/api/auth/login", { username: bob.username, password: "password123", device_name: "PC" });
+    expect(login.status).toBe(200);
+    const open = await computer.connect();
+    expect(await pushesDuring(endpoint, () => say(alice, chat, "to the phone"))).toHaveLength(1);
+    open.close();
+  });
+
+  it("stays quiet for the sender, for a device with the app open, and for muted chats", async () => {
     const { alice, bob, chat, endpoint } = await pair();
     const aliceBrowser = browserKeys();
     const aliceEndpoint = service.url(`alice${n}`);

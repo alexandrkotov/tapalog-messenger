@@ -6,10 +6,11 @@ import * as chats from "./store/chats";
 import * as subscriptions from "./store/push";
 
 /**
- * Who gets woken up, and when: members of the chat other than the sender
- * who have no tab open (an open tab hears the message over its WebSocket)
- * and have not muted the chat. The notification says who wrote and where,
- * never what.
+ * Who gets woken up, and when: every device, of every member but the sender
+ * who has not muted the chat, that has no tab open there (an open tab hears
+ * the message over its WebSocket). So a phone in a pocket is woken even
+ * while the computer has the chat open. The notification says who wrote and
+ * where, never what.
  */
 
 export interface NotifierOptions {
@@ -17,7 +18,7 @@ export interface NotifierOptions {
   vapid: Vapid;
   /** The VAPID subject: how a push service could reach whoever runs this server. */
   subject: () => string;
-  isOnline: (userId: number) => boolean;
+  isDeviceOnline: (userId: number, deviceId: number) => boolean;
   now: () => number;
   /** Which subscription addresses to accept; the known push services unless a test says otherwise. */
   allowEndpoint?: (endpoint: string) => boolean;
@@ -35,8 +36,7 @@ export function createNotifier(o: NotifierOptions) {
     /** Resolves once every push has been handed over (or has failed); callers need not wait. */
     async newMessage(msg: MessageDto): Promise<void> {
       if (msg.from === null) return;
-      const asleep = chats.membersToNotify(db, msg.chat, msg.from, o.now()).filter((id) => !o.isOnline(id));
-      const subs = subscriptions.subscriptionsOf(db, asleep);
+      const subs = subscriptions.subscriptionsOf(db, chats.membersToNotify(db, msg.chat, msg.from, o.now())).filter((s) => !o.isDeviceOnline(s.user_id, s.device_id));
       if (subs.length === 0) return;
       const chat = db.query("SELECT kind, title FROM chats WHERE id = $id").get({ id: msg.chat }) as { kind: string; title: string | null } | null;
       const from = getUser(db, msg.from)?.display_name ?? "";

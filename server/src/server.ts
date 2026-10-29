@@ -84,7 +84,7 @@ export function startServer(opts: ServerOptions): ServerHandle {
   const inviteBase = () => publicUrl ?? `http://localhost:${port}`;
   const files = createFiles({ db: opts.db, mediaDir: opts.mediaDir, now });
   const push = opts.push
-    ? createNotifier({ db: opts.db, ...opts.push, subject: () => publicUrl ?? "https://localhost", isOnline: hub.isOnline, now })
+    ? createNotifier({ db: opts.db, ...opts.push, subject: () => publicUrl ?? "https://localhost", isDeviceOnline: hub.isDeviceOnline, now })
     : null;
   if (push) hub.onNewMessage = (msg) => void push.newMessage(msg);
   const handleApi = createApi({ db: opts.db, hub, files, push, origins, inviteBase, now });
