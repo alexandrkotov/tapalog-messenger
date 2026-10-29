@@ -71,6 +71,17 @@ export interface MediaDto {
   thumb: boolean;
 }
 
+/** One message found by GET /api/search, newest first. */
+export interface SearchHit {
+  chat: number;
+  seq: number;
+  from: number | null;
+  at: number;
+  kind: MessageKind;
+  /** Text around the first word found (or the file's name), on one line. */
+  snippet: string;
+}
+
 export interface MessageDto {
   chat: number;
   seq: number;
@@ -185,7 +196,13 @@ export type ErrorCode =
   | "username_taken"
   | "wrong_password"
   | "chat_full"
-  | "too_large";
+  | "too_large"
+  /** Search across all chats needs a word of three letters or more. */
+  | "too_short"
+  /** The account is blocked by an administrator. */
+  | "blocked"
+  /** A password-reset link that is unknown, used or expired. */
+  | "reset_invalid";
 
 export interface ErrorResponse {
   error: ErrorCode;

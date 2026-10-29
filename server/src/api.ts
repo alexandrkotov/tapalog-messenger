@@ -4,6 +4,7 @@ import { authenticate, clearSessionCookie, sessionCookie, type Origins, type Ses
 import type { createFiles } from "./files";
 import type { Notifier } from "./notify";
 import * as subscriptions from "./store/push";
+import { searchMessages } from "./store/search";
 import { error, json, RateLimiter, readJson } from "./http";
 import type { Hub } from "./hub";
 import * as accounts from "./store/accounts";
@@ -157,8 +158,10 @@ export function createApi(ctx: ApiContext) {
     }
     if (rest[0] === "messages" && rest.length === 1 && req.method === "GET") {
       const before = url.searchParams.get("before_seq");
+      const around = url.searchParams.get("around");
       const limit = Number(url.searchParams.get("limit") ?? 50);
-      if ((before !== null && !isId(Number(before))) || !isId(limit)) return error("bad_request");
+      if ((before !== null && !isId(Number(before))) || (around !== null && !isId(Number(around))) || !isId(limit)) return error("bad_request");
+      if (around !== null) return json(chats.historyAround(db, chatId, Number(around), Math.min(limit, LIMITS.pageMax)));
       return json(chats.history(db, chatId, before === null ? null : Number(before), Math.min(limit, LIMITS.pageMax)));
     }
     if (rest[0] === "members") {
@@ -176,6 +179,20 @@ export function createApi(ctx: ApiContext) {
       }
     }
     return error("not_found");
+  }
+
+  function search(url: URL, s: Session): Response {
+    const q = (url.searchParams.get("q") ?? "").slice(0, 200);
+    const chat = url.searchParams.get("chat");
+    const before = url.searchParams.get("before")?.split(":").map(Number);
+    if (chat !== null && (!isId(Number(chat)) || !chats.memberRole(db, Number(chat), s.user.id))) return error("not_found");
+    if (before && (before.length !== 3 || !before.every((n) => Number.isSafeInteger(n) && n >= 0))) return error("bad_request");
+    const hits = searchMessages(db, s.user.id, q, {
+      chat: chat === null ? undefined : Number(chat),
+      before: before && { at: before[0]!, chat: before[1]!, seq: before[2]! },
+      limit: 50,
+    });
+    return hits === "too_short" ? error("too_short") : json(hits);
   }
 
   async function pushSubscription(req: Request, s: Session): Promise<Response> {
@@ -241,6 +258,7 @@ export function createApi(ctx: ApiContext) {
       return json(q ? accounts.searchUsers(db, q.slice(0, 64), s.user.id) : []);
     }
     if (route === "chats" && req.method === "GET") return json(chats.chatsOfUser(db, s.user.id, hub.isOnline));
+    if (route === "search" && req.method === "GET") return search(url, s);
     if (route === "chats" && req.method === "POST") return createChat(req, s);
     if (parts[0] === "chats" && parts.length >= 2) {
       const chatId = Number(parts[1]);

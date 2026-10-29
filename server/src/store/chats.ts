@@ -406,6 +406,18 @@ export function history(db: Database, chatId: number, beforeSeq: number | null, 
   return withReactions(db, rows.reverse());
 }
 
+/** A page of history around one message (a search hit), oldest first: half before it, the message, the rest after. */
+export function historyAround(db: Database, chatId: number, seq: number, limit: number): MessageDto[] {
+  const before = Math.floor(limit / 2);
+  const older = db
+    .query("SELECT * FROM messages WHERE chat_id = $chatId AND seq < $seq ORDER BY seq DESC LIMIT $before")
+    .all({ chatId, seq, before }) as MessageRow[];
+  const newer = db
+    .query("SELECT * FROM messages WHERE chat_id = $chatId AND seq >= $seq ORDER BY seq LIMIT $after")
+    .all({ chatId, seq, after: limit - before }) as MessageRow[];
+  return withReactions(db, [...older.reverse(), ...newer]);
+}
+
 /** Messages added or changed after `version`, oldest change first. `more` means there were over `limit`. */
 export function changedSince(db: Database, chatId: number, version: number, limit: number): { messages: MessageDto[]; more: boolean } {
   const rows = db

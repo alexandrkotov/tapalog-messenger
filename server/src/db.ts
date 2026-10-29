@@ -3,6 +3,7 @@ import { join } from "node:path";
 import m0001 from "./migrations/0001_init.sql" with { type: "text" };
 import m0002 from "./migrations/0002_core.sql" with { type: "text" };
 import m0003 from "./migrations/0003_media.sql" with { type: "text" };
+import m0004 from "./migrations/0004_polish.sql" with { type: "text" };
 
 /**
  * Numbered schema migrations, embedded in the binary as text. Migration N
@@ -10,7 +11,7 @@ import m0003 from "./migrations/0003_media.sql" with { type: "text" };
  * own PRAGMA user_version, so no bookkeeping table is needed. Append only:
  * never edit a migration that has shipped.
  */
-export const MIGRATIONS: readonly string[] = [m0001, m0002, m0003];
+export const MIGRATIONS: readonly string[] = [m0001, m0002, m0003, m0004];
 
 export const DB_FILE_NAME = "messenger.db";
 

@@ -21,8 +21,8 @@ export function testServer(opts: { publicUrl?: string; trustCfConnectingIp?: boo
     publicUrl: opts.publicUrl ?? null,
     trustCfConnectingIp: opts.trustCfConnectingIp,
     push: opts.push,
-    health: { app: APP_ID, ok: true, version: "0", schema: 3 },
-    status: () => ({ version: "0", schema: 3, localUrl: "", publicUrl: null, setupInviteUrl: null, tunnel: null, addressChangedFrom: null, dataDir: "", startedAt: "" }),
+    health: { app: APP_ID, ok: true, version: "0", schema: 4 },
+    status: () => ({ version: "0", schema: 4, localUrl: "", publicUrl: null, setupInviteUrl: null, tunnel: null, addressChangedFrom: null, dataDir: "", startedAt: "" }),
   });
   const base = `http://localhost:${server.port}`;
   const invite = (grantsAdmin = false) => createInvite(db, { createdBy: null, grantsAdmin, maxUses: 1, expiresAt: null, now: Date.now() }).code;

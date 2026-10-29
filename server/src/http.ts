@@ -41,6 +41,9 @@ const ERROR_STATUS: Record<ErrorCode, number> = {
   username_taken: 409,
   chat_full: 409,
   too_large: 413,
+  too_short: 400,
+  blocked: 403,
+  reset_invalid: 403,
   rate_limited: 429,
 };
 
