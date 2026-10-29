@@ -98,7 +98,15 @@ export function ChatView({ chatId }: { chatId: number }) {
         <Link href={`/chat/${chatId}/info`} class="chat-title" data-testid="chat-title">
           <Avatar name={name} id={other?.id ?? chat.id} online={other?.online} size={36} />
           <span>
-            <strong>{name}</strong>
+            <strong>
+              {name}
+              {chat.muted && (
+                <span class="muted-mark" title={s.mutedChat} aria-label={s.mutedChat} data-testid="muted">
+                  {" "}
+                  🔕
+                </span>
+              )}
+            </strong>
             <small class={typers.length ? "typing" : ""} data-testid="chat-subtitle">
               {subtitle}
             </small>

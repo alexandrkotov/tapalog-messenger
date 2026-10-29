@@ -36,11 +36,17 @@ export function ChatInfo({ chatId }: { chatId: number }) {
             <button disabled={!title.trim() || title.trim() === chat.title}>{s.rename}</button>
           </form>
         )}
+        <div class="chat-card">
+          <Avatar name={chatName(chat)} id={chat.kind === "direct" ? (chat.members.find((m) => m.id !== myId())?.id ?? chat.id) : chat.id} size={64} />
+          <strong>{chatName(chat)}</strong>
+        </div>
+
+        <h3>{s.notifications}</h3>
         <label class="check">
           <input type="checkbox" checked={chat.muted} onChange={(e) => void apply("PATCH", "", { muted: e.currentTarget.checked })} />
           {s.muteChat}
         </label>
-        {chat.kind === "group" && <h3>{fmt(s.members, { n: chat.members.length })}</h3>}
+        <h3>{fmt(s.members, { n: chat.members.length })}</h3>
         <ul class="people">
           {chat.members.map((m) => (
             <li key={m.id} class="person" data-testid="member">

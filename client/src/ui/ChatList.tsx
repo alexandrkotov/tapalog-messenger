@@ -1,10 +1,14 @@
 import { useState } from "preact/hooks";
+import { match, usePath } from "../router";
 import { chatActivity, chatName, myId, otherMembers, tickOf, typingIn, useAppState } from "../state";
 import { Avatar, Link, quoteText, shortTime, Ticks, useLang } from "./common";
 
 export function ChatList() {
   const { s, lang } = useLang();
   const st = useAppState();
+  const path = usePath();
+  // The chat open on the right, its info page included, stays marked here.
+  const current = Number((match("/chat/:id", path) ?? match("/chat/:id/info", path))?.id);
   const [q, setQ] = useState("");
   const query = q.trim().toLowerCase();
   const chats = [...st.chats.values()]
@@ -43,7 +47,7 @@ export function ChatList() {
               : "";
           return (
             <li key={chat.id}>
-              <Link href={`/chat/${chat.id}`} class={`chat-row${st.openChat === chat.id ? " active" : ""}`} data-testid="chat-row" data-chat={chat.id}>
+              <Link href={`/chat/${chat.id}`} class={`chat-row${current === chat.id ? " active" : ""}`} data-testid="chat-row" data-chat={chat.id}>
                 <Avatar name={name} id={other?.id ?? chat.id} online={other?.online} />
                 <span class="chat-row-main">
                   <span class="chat-row-top">

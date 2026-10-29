@@ -52,12 +52,15 @@ test("a chat can be muted, and stays muted", async ({ browser }) => {
   await expect(row.getByTestId("muted")).toHaveCount(0);
 
   await alice.page.getByTestId("chat-title").click();
-  await alice.page.getByLabel("Mute notifications").check();
+  // The info page says whose it is, and the list keeps that chat marked.
+  await expect(alice.page.getByTestId("chat-info")).toContainText("Bob");
+  await expect(row).toHaveClass(/active/);
+  await alice.page.getByLabel("Don't notify me about this chat").check();
   await expect(row.getByTestId("muted")).toBeVisible();
   await alice.page.reload();
   await expect(row.getByTestId("muted")).toBeVisible();
-  await expect(alice.page.getByLabel("Mute notifications")).toBeChecked();
+  await expect(alice.page.getByLabel("Don't notify me about this chat")).toBeChecked();
 
-  await alice.page.getByLabel("Mute notifications").uncheck();
+  await alice.page.getByLabel("Don't notify me about this chat").uncheck();
   await expect(row.getByTestId("muted")).toHaveCount(0);
 });

@@ -94,7 +94,7 @@ const en = {
   notifyUnsupported: "This browser cannot show notifications.",
   turnOn: "Turn on",
   turnOff: "Turn off",
-  muteChat: "Mute notifications",
+  muteChat: "Don't notify me about this chat",
   mutedChat: "Muted",
 
   info: "Info",
@@ -223,7 +223,7 @@ const ru: Strings = {
   notifyUnsupported: "Этот браузер не умеет показывать уведомления.",
   turnOn: "Включить",
   turnOff: "Выключить",
-  muteChat: "Без звука",
+  muteChat: "Не присылать уведомления из этого чата",
   mutedChat: "Без звука",
 
   info: "Информация",
@@ -350,7 +350,7 @@ const uk: Strings = {
   notifyUnsupported: "Цей браузер не вміє показувати сповіщення.",
   turnOn: "Увімкнути",
   turnOff: "Вимкнути",
-  muteChat: "Без звуку",
+  muteChat: "Не надсилати сповіщення з цього чату",
   mutedChat: "Без звуку",
 
   info: "Інформація",
