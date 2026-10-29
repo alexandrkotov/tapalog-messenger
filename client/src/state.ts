@@ -1,6 +1,7 @@
-import type { ChatDto, ClientFrame, MeDto, MemberDto, MessageDto, ServerFrame } from "@tapalog-messenger/shared";
+import type { ChatDto, ClientFrame, ErrorCode, MediaDto, MeDto, MemberDto, MessageDto, MessageKind, ServerFrame } from "@tapalog-messenger/shared";
 import { useEffect, useState } from "preact/hooks";
 import { api, ApiError, deviceName } from "./api";
+import { isPhotoType, preparePhoto, tooLarge, upload, type Outgoing } from "./media";
 import { navigate } from "./router";
 
 /**
@@ -13,11 +14,24 @@ import { navigate } from "./router";
 export interface Pending {
   client_id: string;
   chat: number;
+  kind: MessageKind;
   body: string;
   reply_to?: number;
   at: number;
   /** The server refused it; shown with a retry button. */
   failed?: boolean;
+  /** Why, when the reason is worth telling (a file too large, the hourly upload limit). */
+  error?: ErrorCode;
+  /** A photo, file or recording still to upload. */
+  file?: Outgoing;
+  /** The upload, once done: what msg.send refers to. */
+  media?: MediaDto;
+  /** 0–1 while uploading. */
+  progress?: number;
+  /** A photo still being compressed. */
+  preparing?: boolean;
+  /** msg.send went out on the current connection; cleared on reconnect, when it is sent again (the server drops repeats). */
+  sent?: boolean;
 }
 
 export type Phase = "loading" | "signed-out" | "ready" | "unreachable";
@@ -235,27 +249,123 @@ function syncVersion(chatId: number): number {
 // ---- Sending ---------------------------------------------------------------
 
 export function sendMessage(chat: number, body: string, replyTo?: number) {
-  const p: Pending = { client_id: crypto.randomUUID(), chat, body, at: Date.now(), ...(replyTo !== undefined && { reply_to: replyTo }) };
-  state.outbox.push(p);
-  changed();
-  transmit(p);
+  enqueue({ chat, kind: "text", body, ...(replyTo !== undefined && { reply_to: replyTo }) });
 }
 
-function transmit(p: Pending) {
-  send({ t: "msg.send", chat: p.chat, client_id: p.client_id, kind: "text", body: p.body, ...(p.reply_to !== undefined && { reply_to: p.reply_to }) });
+function enqueue(p: Omit<Pending, "client_id" | "at">): Pending {
+  const full: Pending = { ...p, client_id: crypto.randomUUID(), at: Date.now() };
+  state.outbox.push(full);
+  changed();
+  pump();
+  return full;
+}
+
+/**
+ * Photos (compressed, unless `asFiles`) and other files, one message each,
+ * in the order chosen. The caption and the reply go with the first. Each
+ * takes its place in the queue at once; a photo waits there while it is
+ * being compressed, and whatever is written after it waits behind it.
+ */
+export async function sendFiles(chat: number, files: File[], caption: string, opts: { asFiles?: boolean; replyTo?: number } = {}) {
+  const queued = files.map((file, i) => {
+    const photo = !opts.asFiles && isPhotoType(file.type);
+    return enqueue({
+      chat,
+      kind: photo ? "image" : "file",
+      body: i === 0 ? caption.trim() : "",
+      file: { blob: file, name: file.name || "file" },
+      ...(photo && { preparing: true }),
+      ...(i === 0 && opts.replyTo !== undefined && { reply_to: opts.replyTo }),
+    });
+  });
+  for (const [i, p] of queued.entries()) {
+    if (p.preparing) {
+      const photo = await preparePhoto(files[i]!);
+      // A picture this browser cannot read (HEIC outside Safari) goes as a file.
+      if (photo) p.file = photo;
+      else p.kind = "file";
+      p.preparing = false;
+    }
+    if (tooLarge(p.file!.blob)) Object.assign(p, { failed: true, error: "too_large" });
+    changed();
+    pump();
+  }
+}
+
+export function sendVoice(chat: number, recording: Outgoing, replyTo?: number) {
+  enqueue({ chat, kind: "voice", body: "", file: recording, ...(replyTo !== undefined && { reply_to: replyTo }) });
+}
+
+let uploading: Pending | null = null;
+const UPLOAD_RETRY_MS = 5000;
+
+/**
+ * Moves the outbox along, oldest first: a message goes out only after every
+ * earlier one in its chat, so a photo still uploading keeps the text written
+ * after it waiting rather than letting it overtake. One upload at a time.
+ * Safe to call any time; it does only what is possible right now.
+ */
+function pump() {
+  if (state.conn !== "online") return; // everything goes once the connection is back
+  const blocked = new Set<number>();
+  for (const p of state.outbox) {
+    if (p.failed || blocked.has(p.chat)) continue;
+    if (p.preparing || (p.file && !p.media)) {
+      blocked.add(p.chat);
+      if (!p.preparing && !uploading) void uploadFor(p);
+      continue;
+    }
+    if (p.sent) continue;
+    if (!send(sendFrame(p))) return;
+    p.sent = true;
+  }
+}
+
+function sendFrame(p: Pending): ClientFrame {
+  return {
+    t: "msg.send",
+    chat: p.chat,
+    client_id: p.client_id,
+    kind: p.kind,
+    body: p.body,
+    ...(p.media && { media: p.media.id }),
+    ...(p.reply_to !== undefined && { reply_to: p.reply_to }),
+  };
+}
+
+async function uploadFor(p: Pending) {
+  uploading = p;
+  p.progress = 0;
+  changed();
+  try {
+    p.media = await upload(p.file!, (share) => {
+      p.progress = share;
+      changed();
+    });
+  } catch (err) {
+    const code = err instanceof ApiError ? err.code : "network";
+    if (code === "network") setTimeout(pump, UPLOAD_RETRY_MS);
+    else Object.assign(p, { failed: true, error: code });
+  } finally {
+    uploading = null;
+    p.progress = undefined;
+    changed();
+  }
+  pump();
 }
 
 export function retry(clientId: string) {
   const p = state.outbox.find((x) => x.client_id === clientId);
   if (!p) return;
-  p.failed = false;
+  Object.assign(p, { failed: false, error: undefined, sent: false });
   changed();
-  transmit(p);
+  pump();
 }
 
 export function discard(clientId: string) {
   state.outbox = state.outbox.filter((p) => p.client_id !== clientId);
   changed();
+  pump(); // whatever waited behind it may go now
 }
 
 export const editMessage = (chat: number, seq: number, body: string) => send({ t: "msg.edit", chat, seq, body });
@@ -368,7 +478,8 @@ window.addEventListener("online", () => {
 async function onReconnected() {
   // Receipts, members and unread counts moved while away; the chat list is the cheap way to catch up on them.
   await loadChats().catch(() => {});
-  for (const p of state.outbox) if (!p.failed) transmit(p);
+  for (const p of state.outbox) p.sent = false;
+  pump();
 }
 
 function onFrame(f: ServerFrame) {
@@ -385,7 +496,7 @@ function onFrame(f: ServerFrame) {
       state.outbox.splice(i, 1);
       // Shown as sent right away; the msg.new that follows replaces it with the stored copy.
       onMessage(
-        { chat: f.chat, seq: f.seq, client_id: p.client_id, from: myId(), kind: "text", body: p.body, media: null, reply_to: p.reply_to ?? null, at: f.at, edited_at: null, deleted: false, version: 0, reactions: {} },
+        { chat: f.chat, seq: f.seq, client_id: p.client_id, from: myId(), kind: p.kind, body: p.body, media: p.media ?? null, reply_to: p.reply_to ?? null, at: f.at, edited_at: null, deleted: false, version: 0, reactions: {} },
         false,
       );
       break;
@@ -446,7 +557,11 @@ function onFrame(f: ServerFrame) {
     case "error":
       if (f.ref) {
         const p = state.outbox.find((x) => x.client_id === f.ref);
-        if (p && f.code === "rate_limited") setTimeout(() => transmit(p), 3000);
+        if (p && f.code === "rate_limited")
+          setTimeout(() => {
+            p.sent = false;
+            pump();
+          }, 3000);
         else if (p) p.failed = true;
       }
       break;

@@ -1,6 +1,7 @@
-import type { ChatDto, MessageDto } from "@tapalog-messenger/shared";
+import type { ChatDto, MediaDto, MessageDto } from "@tapalog-messenger/shared";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { fmt } from "../i18n";
+import { formatDuration, startRecording, type Recording } from "../media";
 import {
   chatName,
   deleteMessage,
@@ -12,7 +13,9 @@ import {
   otherMembers,
   react,
   retry,
+  sendFiles,
   sendMessage,
+  sendVoice,
   tickOf,
   typing,
   typingIn,
@@ -20,7 +23,8 @@ import {
   type Pending,
 } from "../state";
 import { ConnBanner } from "./ChatList";
-import { Avatar, clockTime, lastSeenText, Link, Linkified, Ticks, useLang } from "./common";
+import { Avatar, clockTime, errorText, lastSeenText, Link, Linkified, quoteText, Ticks, useLang } from "./common";
+import { AttachmentChip, MessageMedia, PendingMedia, PhotoViewer } from "./Media";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
@@ -32,11 +36,16 @@ export function ChatView({ chatId }: { chatId: number }) {
   const chat = st.chats.get(chatId);
   const [draft, setDraft] = useState<Draft>({ mode: "new" });
   const [selected, setSelected] = useState<number | null>(null);
+  const [viewing, setViewing] = useState<string | null>(null);
+  const [dropping, setDropping] = useState(false);
+  const [dropped, setDropped] = useState<File[]>([]);
 
   useEffect(() => {
     void openChat(chatId);
     setDraft({ mode: "new" });
     setSelected(null);
+    setViewing(null);
+    setDropped([]);
     return () => void openChat(null);
   }, [chatId]);
 
@@ -59,9 +68,29 @@ export function ChatView({ chatId }: { chatId: number }) {
   const byId = (id: number | null) => chat.members.find((m) => m.id === id);
   const bySeq = (seq: number) => messages.find((m) => m.seq === seq);
   const isAdmin = chat.kind === "group" && byId(myId())?.role === "admin";
+  const photos = messages.filter((m) => m.kind === "image" && m.media).map((m) => m.media as MediaDto);
+  const hasFiles = (e: DragEvent) => [...(e.dataTransfer?.types ?? [])].includes("Files");
 
   return (
-    <section class="chat-view" data-testid="chat-view" data-chat={chatId}>
+    <section
+      class="chat-view"
+      data-testid="chat-view"
+      data-chat={chatId}
+      onDragOver={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        setDropping(true);
+      }}
+      onDragLeave={(e) => e.relatedTarget === null && setDropping(false)}
+      onDrop={(e) => {
+        setDropping(false);
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        setDropped([...(e.dataTransfer?.files ?? [])]);
+      }}
+    >
+      {dropping && <div class="drop-overlay">{s.dropHere}</div>}
+      {viewing && <PhotoViewer photos={photos} id={viewing} onClose={() => setViewing(null)} onShow={setViewing} />}
       <header class="bar">
         <Link href="/" class="icon-button back" aria-label={s.back}>
           ←
@@ -77,7 +106,7 @@ export function ChatView({ chatId }: { chatId: number }) {
         </Link>
       </header>
       <ConnBanner inChat />
-      <MessageList chat={chat} messages={messages} pending={pending} selected={selected} onSelect={setSelected}>
+      <MessageList chat={chat} messages={messages} pending={pending} selected={selected} onSelect={setSelected} onOpenPhoto={setViewing}>
         {(m) =>
           selected === m.seq &&
           !m.deleted && (
@@ -98,7 +127,7 @@ export function ChatView({ chatId }: { chatId: number }) {
               <button type="button" onClick={() => (setDraft({ mode: "reply", seq: m.seq }), setSelected(null))}>
                 {s.reply}
               </button>
-              {m.from === myId() && (
+              {m.from === myId() && m.kind === "text" && (
                 <button type="button" onClick={() => (setDraft({ mode: "edit", seq: m.seq }), setSelected(null))}>
                   {s.edit}
                 </button>
@@ -126,6 +155,8 @@ export function ChatView({ chatId }: { chatId: number }) {
         target={"seq" in draft ? bySeq(draft.seq) : undefined}
         targetName={"seq" in draft ? (byId(bySeq(draft.seq)?.from ?? null)?.display_name ?? "") : ""}
         onDone={() => setDraft({ mode: "new" })}
+        dropped={dropped}
+        onTakeDropped={() => setDropped([])}
       />
     </section>
   );
@@ -137,6 +168,7 @@ function MessageList({
   pending,
   selected,
   onSelect,
+  onOpenPhoto,
   children,
 }: {
   chat: ChatDto;
@@ -144,6 +176,7 @@ function MessageList({
   pending: Pending[];
   selected: number | null;
   onSelect: (seq: number | null) => void;
+  onOpenPhoto: (id: string) => void;
   children: (m: MessageDto) => unknown;
 }) {
   const { s, lang } = useLang();
@@ -187,12 +220,15 @@ function MessageList({
               {reply && (
                 <span class="quote">
                   <strong>{byId(reply.from)?.display_name}</strong>
-                  {reply.deleted ? s.deleted : reply.body}
+                  {reply.deleted ? s.deleted : quoteText(s, reply)}
                 </span>
               )}
-              <span class="body" data-testid="message-body">
-                {m.deleted ? s.deleted : <Linkified text={m.body} />}
-              </span>
+              {!m.deleted && <MessageMedia msg={m} onOpenPhoto={onOpenPhoto} />}
+              {(m.deleted || m.body) && (
+                <span class="body" data-testid="message-body">
+                  {m.deleted ? s.deleted : <Linkified text={m.body} />}
+                </span>
+              )}
               <span class="meta">
                 {m.edited_at !== null && !m.deleted && <span>{s.edited}</span>}
                 {clockTime(m.at, lang)}
@@ -216,9 +252,17 @@ function MessageList({
       {pending.map((p) => (
         <div key={p.client_id} class="msg-row mine" data-testid="message" data-pending="true">
           <div class={`bubble${p.failed ? " failed" : ""}`} onClick={() => p.failed && retry(p.client_id)} title={p.failed ? s.notSent : undefined}>
-            <span class="body" data-testid="message-body">
-              <Linkified text={p.body} />
-            </span>
+            {p.file && <PendingMedia kind={p.kind} file={p.file} progress={p.progress} />}
+            {p.body && (
+              <span class="body" data-testid="message-body">
+                <Linkified text={p.body} />
+              </span>
+            )}
+            {p.failed && p.error && (
+              <small class="error" role="alert">
+                {p.error === "rate_limited" && p.file ? s.uploadLimit : errorText(s, p.error)}
+              </small>
+            )}
             <span class="meta">
               {clockTime(p.at, lang)}
               <Ticks tick={p.failed ? "failed" : "pending"} />
@@ -235,21 +279,96 @@ function MessageList({
   );
 }
 
-function Composer({ chatId, draft, target, targetName, onDone }: { chatId: number; draft: Draft; target?: MessageDto; targetName: string; onDone: () => void }) {
+function Composer({
+  chatId,
+  draft,
+  target,
+  targetName,
+  onDone,
+  dropped,
+  onTakeDropped,
+}: {
+  chatId: number;
+  draft: Draft;
+  target?: MessageDto;
+  targetName: string;
+  onDone: () => void;
+  dropped: File[];
+  onTakeDropped: () => void;
+}) {
   const { s } = useLang();
   const [text, setText] = useState(draft.mode === "edit" ? (target?.body ?? "") : "");
+  const [files, setFiles] = useState<File[]>([]);
+  const [asFiles, setAsFiles] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [recording, setRecording] = useState<Recording | null>(null);
+  const [, setClock] = useState(0);
+  const [notice, setNotice] = useState("");
   const input = useRef<HTMLTextAreaElement>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const editing = draft.mode === "edit";
+  const replyTo = draft.mode === "reply" ? draft.seq : undefined;
   useEffect(() => input.current?.focus(), []);
+
+  useEffect(() => {
+    if (!dropped.length || editing) return;
+    setFiles((f) => [...f, ...dropped]);
+    onTakeDropped();
+  }, [dropped]);
+
+  // The recording timer ticks; the recording itself stops on its own at the length limit.
+  useEffect(() => {
+    if (!recording) return;
+    const timer = setInterval(() => setClock((n) => n + 1), 250);
+    return () => clearInterval(timer);
+  }, [recording]);
+  useEffect(() => () => recording?.cancel(), [recording]);
+
+  const addFiles = (list: FileList | null) => {
+    if (list?.length) setFiles((f) => [...f, ...list]);
+    setMenu(false);
+  };
 
   const submit = () => {
     const body = text.trim();
-    if (!body) return;
-    if (draft.mode === "edit") {
+    if (files.length) {
+      void sendFiles(chatId, files, body, { asFiles, replyTo });
+      setFiles([]);
+      setAsFiles(false);
+    } else if (!body) return;
+    else if (editing) {
       if (body !== target?.body) editMessage(chatId, draft.seq, body);
-    } else sendMessage(chatId, body, draft.mode === "reply" ? draft.seq : undefined);
+    } else sendMessage(chatId, body, replyTo);
     setText("");
     onDone();
   };
+
+  const record = async () => {
+    setNotice("");
+    try {
+      const r = await startRecording(() => void finishRecording(r));
+      setRecording(r);
+    } catch (err) {
+      setNotice(err instanceof Error && err.message === "unsupported" ? s.micUnsupported : s.micDenied);
+    }
+  };
+
+  const finishRecording = async (r: Recording | null = recording) => {
+    if (!r) return;
+    setRecording(null);
+    const out = await r.stop();
+    if (out) sendVoice(chatId, out, replyTo);
+    onDone();
+  };
+
+  const cancelRecording = () => {
+    recording?.cancel();
+    setRecording(null);
+  };
+
+  const hasPhotos = files.some((f) => f.type.startsWith("image/"));
+  const canSend = Boolean(text.trim() || files.length);
 
   return (
     <form
@@ -262,39 +381,103 @@ function Composer({ chatId, draft, target, targetName, onDone }: { chatId: numbe
       {draft.mode !== "new" && (
         <div class="composer-context">
           <span>
-            <strong>{draft.mode === "edit" ? s.editing : fmt(s.replyingTo, { name: targetName })}</strong>
-            {target && !target.deleted && <span class="quote-text">{target.body}</span>}
+            <strong>{editing ? s.editing : fmt(s.replyingTo, { name: targetName })}</strong>
+            {target && !target.deleted && <span class="quote-text">{quoteText(s, target)}</span>}
           </span>
           <button type="button" class="link" onClick={onDone} aria-label={s.cancel}>
             ✕
           </button>
         </div>
       )}
-      <div class="composer-row">
-        <textarea
-          ref={input}
-          rows={1}
-          placeholder={s.messagePlaceholder}
-          aria-label={s.messagePlaceholder}
-          maxLength={10_000}
-          value={text}
-          onInput={(e) => {
-            setText(e.currentTarget.value);
-            if (draft.mode !== "edit") typing(chatId);
-          }}
-          onKeyDown={(e) => {
-            // Enter sends, Shift+Enter is a new line (as in WhatsApp Web and Telegram).
-            if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      {files.length > 0 && (
+        <div class="attachments">
+          <div class="attachment-list">
+            {files.map((f, i) => (
+              <AttachmentChip key={`${f.name}-${i}`} file={f} onRemove={() => setFiles(files.filter((_, j) => j !== i))} />
+            ))}
+          </div>
+          {hasPhotos && (
+            <label class="check">
+              <input type="checkbox" checked={asFiles} onChange={(e) => setAsFiles(e.currentTarget.checked)} data-testid="send-as-files" />
+              {s.sendAsFiles}
+            </label>
+          )}
+        </div>
+      )}
+      {notice && (
+        <p class="error composer-notice" role="alert">
+          {notice}
+        </p>
+      )}
+      <input ref={photoInput} type="file" accept="image/*" multiple hidden onChange={(e) => (addFiles(e.currentTarget.files), (e.currentTarget.value = ""))} data-testid="photo-input" />
+      <input ref={fileInput} type="file" multiple hidden onChange={(e) => (addFiles(e.currentTarget.files), (e.currentTarget.value = ""))} data-testid="file-input" />
+      {recording ? (
+        <div class="composer-row recording" data-testid="recording">
+          <button type="button" class="icon-button" onClick={cancelRecording} aria-label={s.cancel} data-testid="record-cancel">
+            ✕
+          </button>
+          <span class="rec-dot" aria-hidden="true" />
+          <span class="rec-time">{formatDuration(recording.elapsed() * 1000)}</span>
+          <button type="button" class="primary send" onClick={() => void finishRecording()} aria-label={s.stopAndSend} data-testid="record-send">
+            ➤
+          </button>
+        </div>
+      ) : (
+        <div class="composer-row">
+          {!editing && (
+            <div class="attach-wrap">
+              <button type="button" class="icon-button attach" onClick={() => setMenu(!menu)} aria-label={s.attach} aria-expanded={menu} title={s.attach} data-testid="attach">
+                📎
+              </button>
+              {menu && (
+                <div class="attach-menu" role="menu">
+                  <button type="button" role="menuitem" onClick={() => photoInput.current?.click()} data-testid="attach-photo">
+                    🖼 {s.photo}
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => fileInput.current?.click()} data-testid="attach-file">
+                    📄 {s.file}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          <textarea
+            ref={input}
+            rows={1}
+            placeholder={files.length ? s.captionPlaceholder : s.messagePlaceholder}
+            aria-label={s.messagePlaceholder}
+            maxLength={10_000}
+            value={text}
+            onInput={(e) => {
+              setText(e.currentTarget.value);
+              if (!editing) typing(chatId);
+            }}
+            onPaste={(e) => {
+              const pasted = [...(e.clipboardData?.files ?? [])];
+              if (!pasted.length || editing) return;
               e.preventDefault();
-              submit();
-            }
-            if (e.key === "Escape" && draft.mode !== "new") onDone();
-          }}
-        />
-        <button class="primary send" disabled={!text.trim()} aria-label={draft.mode === "edit" ? s.save : s.send}>
-          {draft.mode === "edit" ? "✓" : "➤"}
-        </button>
-      </div>
+              setFiles((f) => [...f, ...pasted]);
+            }}
+            onKeyDown={(e) => {
+              // Enter sends, Shift+Enter is a new line (as in WhatsApp Web and Telegram).
+              if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+                e.preventDefault();
+                submit();
+              }
+              if (e.key === "Escape" && draft.mode !== "new") onDone();
+            }}
+          />
+          {canSend || editing ? (
+            <button class="primary send" disabled={!canSend} aria-label={editing ? s.save : s.send}>
+              {editing ? "✓" : "➤"}
+            </button>
+          ) : (
+            <button type="button" class="primary send" onClick={() => void record()} aria-label={s.recordVoice} title={s.recordVoice} data-testid="record">
+              🎤
+            </button>
+          )}
+        </div>
+      )}
     </form>
   );
 }

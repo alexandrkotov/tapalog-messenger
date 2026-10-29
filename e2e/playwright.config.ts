@@ -20,8 +20,18 @@ export default defineConfig({
   use: { baseURL: BASE_URL, trace: "retain-on-failure" },
   expect: { timeout: 10_000 },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-    { name: "firefox", use: { ...devices["Desktop Firefox"] } },
+    // A fake microphone, allowed without asking, for the voice-message tests.
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"], launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] } },
+    },
+    {
+      name: "firefox",
+      use: {
+        ...devices["Desktop Firefox"],
+        launchOptions: { firefoxUserPrefs: { "media.navigator.streams.fake": true, "media.navigator.permission.disabled": true } },
+      },
+    },
     { name: "webkit", use: { ...devices["Desktop Safari"] } },
   ],
   webServer: {

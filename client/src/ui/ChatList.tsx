@@ -1,6 +1,6 @@
 import { useState } from "preact/hooks";
 import { chatActivity, chatName, myId, otherMembers, tickOf, typingIn, useAppState } from "../state";
-import { Avatar, Link, shortTime, Ticks, useLang } from "./common";
+import { Avatar, Link, quoteText, shortTime, Ticks, useLang } from "./common";
 
 export function ChatList() {
   const { s, lang } = useLang();
@@ -34,7 +34,13 @@ export function ChatList() {
           const last = chat.last_message;
           const fromMe = pending || (last && last.from === myId());
           const sender = chat.kind === "group" && last && !fromMe ? chat.members.find((m) => m.id === last.from)?.display_name : undefined;
-          const preview = pending ? pending.body : last ? (last.deleted ? s.deleted : last.body) : "";
+          const preview = pending
+            ? quoteText(s, { kind: pending.kind, body: pending.body, media: pending.file })
+            : last
+              ? last.deleted
+                ? s.deleted
+                : quoteText(s, last)
+              : "";
           return (
             <li key={chat.id}>
               <Link href={`/chat/${chat.id}`} class={`chat-row${st.openChat === chat.id ? " active" : ""}`} data-testid="chat-row" data-chat={chat.id}>

@@ -353,6 +353,7 @@ small {
 
 /* Chat */
 .chat-view {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -544,6 +545,293 @@ small {
   padding: 0;
   border-radius: 50%;
   flex: none;
+}
+button.icon-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  flex: none;
+}
+
+/* Photos, files and voice in the feed */
+.photo {
+  display: block;
+  position: relative;
+  max-width: 100%;
+  padding: 0;
+  margin: 2px 0 4px;
+  border: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
+  cursor: zoom-in;
+}
+.photo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.photo.pending {
+  cursor: default;
+}
+.upload-progress {
+  display: block;
+  height: 4px;
+  margin: 4px 0;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--muted) 30%, transparent);
+  overflow: hidden;
+}
+.photo .upload-progress {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  margin: 0;
+}
+.upload-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s;
+}
+.file-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 200px;
+  max-width: 100%;
+  padding: 6px 8px;
+  margin: 2px 0 4px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+  color: inherit;
+  text-decoration: none;
+}
+.file-icon {
+  font-size: 26px;
+}
+.file-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.voice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 220px;
+  max-width: 100%;
+  margin: 2px 0;
+}
+.voice-play {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  padding: 0;
+  border-radius: 50%;
+  border: 0;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 13px;
+}
+.waveform {
+  flex: 1;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  cursor: pointer;
+}
+.waveform span {
+  flex: 1;
+  min-width: 1px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+}
+.waveform span.played {
+  background: var(--accent);
+}
+.voice-time {
+  font-size: 12px;
+  min-width: 34px;
+  text-align: right;
+}
+
+/* Full-screen photo */
+.viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 0.92);
+}
+.viewer img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.viewer-bar {
+  position: absolute;
+  top: calc(8px + env(safe-area-inset-top));
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  z-index: 1;
+}
+.viewer .icon-button {
+  color: #fff;
+  background: rgb(0 0 0 / 0.4);
+}
+.viewer-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 64px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: rgb(0 0 0 / 0.4);
+  color: #fff;
+  font-size: 32px;
+  z-index: 1;
+}
+.viewer-nav.prev {
+  left: 8px;
+}
+.viewer-nav.next {
+  right: 8px;
+}
+
+/* Composer: attachments and recording */
+.attach-wrap {
+  position: relative;
+  align-self: center;
+}
+.attach-menu {
+  position: absolute;
+  bottom: 44px;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
+  z-index: 5;
+}
+.attach-menu button {
+  border: 0;
+  background: none;
+  text-align: left;
+  padding: 8px 10px;
+}
+.attach-menu button:hover {
+  background: var(--hover);
+}
+.attachments {
+  margin-bottom: 6px;
+}
+.attachment-list {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.attachment {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 64px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--hover);
+}
+.attachment img {
+  height: 64px;
+  width: 64px;
+  object-fit: cover;
+}
+.attachment-name {
+  max-width: 160px;
+  padding: 0 28px 0 10px;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  font-size: 11px;
+}
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+label.check input {
+  width: auto;
+}
+.composer-notice {
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.composer-row.recording {
+  align-items: center;
+}
+.rec-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+  animation: rec-blink 1s infinite;
+}
+@keyframes rec-blink {
+  50% {
+    opacity: 0.2;
+  }
+}
+.rec-time {
+  flex: 1;
+  font-variant-numeric: tabular-nums;
+}
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px dashed var(--accent);
+  background: color-mix(in srgb, var(--panel) 85%, transparent);
+  font-size: 18px;
+  pointer-events: none;
+}
+.bubble .error {
+  font-size: 12px;
 }
 
 /* Side panels: new chat, info, settings */

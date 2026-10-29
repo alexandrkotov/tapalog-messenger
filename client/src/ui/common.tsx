@@ -2,6 +2,7 @@ import { createContext, type ComponentChildren } from "preact";
 import { useContext } from "preact/hooks";
 import { fmt, t, type Lang, type Strings } from "../i18n";
 import { navigate } from "../router";
+import type { MessageKind } from "@tapalog-messenger/shared";
 import type { Tick } from "../state";
 
 export const LangContext = createContext<{ lang: Lang; s: Strings; setLang: (l: Lang) => void }>({ lang: "en", s: t("en"), setLang: () => {} });
@@ -89,4 +90,11 @@ export function Link({ href, children, class: cls, ...rest }: { href: string; ch
 export function errorText(s: Strings, code: string): string {
   const key = `err_${code}` as keyof Strings;
   return key in s ? s[key] : s.err_generic;
+}
+
+/** One line standing for a message in a quote or the chat list: its text, or what it carries. */
+export function quoteText(s: Strings, m: { kind: MessageKind; body: string; media?: { name: string } | null }): string {
+  if (m.kind === "text") return m.body;
+  const what = m.kind === "image" ? `📷 ${s.photo}` : m.kind === "voice" ? `🎤 ${s.voiceMessage}` : `📄 ${m.media?.name ?? s.file}`;
+  return m.body ? `${what}: ${m.body}` : what;
 }
