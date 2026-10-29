@@ -58,7 +58,7 @@ async function encode(bitmap: ImageBitmap, max: number, quality: number): Promis
  * rotation is applied first. Null when the browser cannot read the picture
  * (HEIC outside Safari, say): it then goes as a file.
  */
-export async function preparePhoto(file: File): Promise<Outgoing | null> {
+export async function preparePhoto(file: Blob, name: string): Promise<Outgoing | null> {
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
@@ -68,10 +68,10 @@ export async function preparePhoto(file: File): Promise<Outgoing | null> {
   try {
     const thumb = await encode(bitmap, THUMB_SIDE, 0.7);
     // An animated GIF would lose its animation; it goes as it is.
-    if (file.type === "image/gif") return { blob: file, name: file.name, width: bitmap.width, height: bitmap.height, thumb: thumb.blob };
+    if (file.type === "image/gif") return { blob: file, name, width: bitmap.width, height: bitmap.height, thumb: thumb.blob };
     const photo = await encode(bitmap, PHOTO_SIDE, 0.8);
     const ext = photo.blob.type === "image/webp" ? "webp" : "jpg";
-    return { blob: photo.blob, name: file.name.replace(/\.[^.]*$/, "") + `.${ext}`, width: photo.width, height: photo.height, thumb: thumb.blob };
+    return { blob: photo.blob, name: name.replace(/\.[^.]*$/, "") + `.${ext}`, width: photo.width, height: photo.height, thumb: thumb.blob };
   } finally {
     bitmap.close();
   }

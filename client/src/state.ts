@@ -2,6 +2,7 @@ import type { ChatDto, ClientFrame, ErrorCode, MediaDto, MeDto, MemberDto, Messa
 import { useEffect, useState } from "preact/hooks";
 import { api, ApiError, deviceName } from "./api";
 import { isPhotoType, preparePhoto, tooLarge, upload, type Outgoing } from "./media";
+import * as offline from "./offline";
 import { navigate } from "./router";
 
 /**
@@ -50,14 +51,17 @@ export const state = {
   /** chat → user → typing until (ms) */
   typing: new Map<number, Map<number, number>>(),
   openChat: null as number | null,
+  /** A newer version of the app is installed; reloading starts it. */
+  updateReady: false,
 };
 
 // ---- Subscriptions ---------------------------------------------------------
 
 const listeners = new Set<() => void>();
 let scheduled = false;
-/** Re-renders subscribers once per tick, however many changes happened. */
+/** Re-renders subscribers once per tick, however many changes happened, and saves the state a moment later. */
 function changed() {
+  saveSoon();
   if (scheduled) return;
   scheduled = true;
   queueMicrotask(() => {
@@ -110,24 +114,129 @@ export function chatActivity(chat: ChatDto): number {
   return Math.max(chat.last_message?.at ?? 0, ...pending);
 }
 
+// ---- Kept on this device ---------------------------------------------------
+
+/** Bumped when what is saved changes shape; an older copy is then dropped rather than misread. */
+const SAVED_SHAPE = 1;
+/** The latest messages kept per opened chat. */
+const KEEP_MESSAGES = 200;
+const SAVE_DELAY_MS = 500;
+
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+const savedChats = new Set<number>();
+/** client_id → what was last written for it, so an unchanged entry (and its file) is not written again. */
+const savedOutbox = new Map<string, string>();
+const blobIds = new WeakMap<Blob, number>();
+let nextBlobId = 1;
+
+function blobId(blob: Blob | undefined): number {
+  if (!blob) return 0;
+  if (!blobIds.has(blob)) blobIds.set(blob, nextBlobId++);
+  return blobIds.get(blob)!;
+}
+
+/** What is kept of an outbox entry: upload progress and "sent on this connection" mean nothing after a restart. */
+function keepable({ sent: _sent, progress: _progress, ...p }: Pending): Pending {
+  return p;
+}
+
+const signature = (p: Pending) => JSON.stringify({ ...p, file: p.file && { ...p.file, blob: blobId(p.file.blob), thumb: blobId(p.file.thumb) } });
+
+function saveSoon() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(save, SAVE_DELAY_MS);
+}
+
+/** Writes what this device should still show after a restart without a network. */
+function save() {
+  clearTimeout(saveTimer);
+  if (!state.me) return;
+  const ids = state.outbox.map((p) => p.client_id);
+  const entries: [string, unknown][] = [
+    ["shape", SAVED_SHAPE],
+    ["me", state.me],
+    ["chats", [...state.chats.values()]],
+    ["outbox", ids],
+  ];
+  for (const p of state.outbox) {
+    const kept = keepable(p);
+    const sig = signature(kept);
+    if (savedOutbox.get(p.client_id) === sig) continue;
+    entries.push([`outbox:${p.client_id}`, kept]);
+    savedOutbox.set(p.client_id, sig);
+  }
+  for (const id of [...savedOutbox.keys()]) {
+    if (ids.includes(id)) continue;
+    entries.push([`outbox:${id}`, undefined]);
+    savedOutbox.delete(id);
+  }
+  for (const [id, list] of state.messages) entries.push([`messages:${id}`, list.slice(-KEEP_MESSAGES)]);
+  for (const id of savedChats) if (!state.messages.has(id)) entries.push([`messages:${id}`, undefined]);
+  savedChats.clear();
+  for (const id of state.messages.keys()) savedChats.add(id);
+  void offline.putMany(entries);
+}
+// A tab being closed or sent to the background may not get another chance.
+addEventListener("pagehide", save);
+document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && save());
+
+/** Puts back what was saved, if it belongs to a signed-in account. */
+async function restore(): Promise<boolean> {
+  const saved = await offline.getAll();
+  const me = saved.get("me") as MeDto | undefined;
+  if (saved.get("shape") !== SAVED_SHAPE || !me) return false;
+  state.me = me;
+  state.chats = new Map(((saved.get("chats") as ChatDto[] | undefined) ?? []).map((c) => [c.id, c]));
+  for (const [key, value] of saved) {
+    if (!key.startsWith("messages:")) continue;
+    const id = Number(key.slice("messages:".length));
+    const list = value as MessageDto[];
+    state.messages.set(id, list);
+    state.older.set(id, (list[0]?.seq ?? 1) > 1);
+    savedChats.add(id);
+  }
+  const ids = (saved.get("outbox") as string[] | undefined) ?? [];
+  state.outbox = ids.map((id) => saved.get(`outbox:${id}`) as Pending | undefined).filter((p): p is Pending => p !== undefined);
+  for (const p of state.outbox) savedOutbox.set(p.client_id, signature(p));
+  // A photo that was still being compressed when the page closed: compress it now.
+  for (const p of state.outbox) if (p.preparing) void prepare(p);
+  return true;
+}
+
 // ---- Boot and auth ---------------------------------------------------------
 
 let bootTimer: ReturnType<typeof setTimeout> | undefined;
 
+/**
+ * Starts the app from what this device saved, if anything, so it opens
+ * without a network; then asks the server who is signed in, and keeps
+ * asking every few seconds while it cannot be reached.
+ */
 export async function boot() {
   clearTimeout(bootTimer);
+  if (state.phase === "loading" && (await restore())) {
+    state.phase = "ready";
+    changed();
+  }
   try {
-    state.me = await api<MeDto>("GET", "/me");
+    const me = await api<MeDto>("GET", "/me");
+    // Saved for someone else (signed out elsewhere, then signed in as another person): start clean.
+    if (state.me && state.me.user.id !== me.user.id) resetState();
+    state.me = me;
     state.phase = "ready";
     changed();
     await loadChats();
     connect();
   } catch (err) {
-    if (err instanceof ApiError && err.status === 401) state.phase = "signed-out";
-    else {
-      state.phase = "unreachable";
-      bootTimer = setTimeout(boot, 5000);
+    if (err instanceof ApiError && err.status === 401) {
+      // Saved from a session that has since ended: forget it. Otherwise stay on the page asked for (an invite link, say).
+      if (state.me) return signedOut();
+      state.phase = "signed-out";
+      return changed();
     }
+    if (state.phase !== "ready") state.phase = "unreachable";
+    state.conn = "offline";
+    bootTimer = setTimeout(boot, 5000);
     changed();
   }
 }
@@ -155,16 +264,34 @@ export async function logout() {
   signedOut();
 }
 
-function signedOut() {
-  disconnect();
-  state.me = null;
-  state.phase = "signed-out";
+function resetState() {
   state.chats.clear();
   state.messages.clear();
   state.older.clear();
   state.outbox = [];
   state.typing.clear();
+}
+
+/** Forgets everything about the account on this device, saved copies and cached previews included. */
+function signedOut() {
+  disconnect();
+  clearTimeout(saveTimer);
+  state.me = null;
+  state.phase = "signed-out";
+  resetState();
+  savedChats.clear();
+  savedOutbox.clear();
+  void offline.clearAll();
+  void caches?.delete(THUMB_CACHE).catch(() => {});
   navigate("/", true);
+  changed();
+}
+
+/** The service worker's cache of photo previews (see public/sw.js). */
+const THUMB_CACHE = "thumbs";
+
+export function setUpdateReady() {
+  state.updateReady = true;
   changed();
 }
 
@@ -256,6 +383,7 @@ function enqueue(p: Omit<Pending, "client_id" | "at">): Pending {
   const full: Pending = { ...p, client_id: crypto.randomUUID(), at: Date.now() };
   state.outbox.push(full);
   changed();
+  save();
   pump();
   return full;
 }
@@ -278,18 +406,22 @@ export async function sendFiles(chat: number, files: File[], caption: string, op
       ...(i === 0 && opts.replyTo !== undefined && { reply_to: opts.replyTo }),
     });
   });
-  for (const [i, p] of queued.entries()) {
-    if (p.preparing) {
-      const photo = await preparePhoto(files[i]!);
-      // A picture this browser cannot read (HEIC outside Safari) goes as a file.
-      if (photo) p.file = photo;
-      else p.kind = "file";
-      p.preparing = false;
-    }
-    if (tooLarge(p.file!.blob)) Object.assign(p, { failed: true, error: "too_large" });
-    changed();
-    pump();
+  save(); // the files are safe on this device before the slow part starts
+  for (const p of queued) await prepare(p);
+}
+
+/** Compresses a queued photo, then lets the outbox move. */
+async function prepare(p: Pending) {
+  if (p.preparing) {
+    const photo = await preparePhoto(p.file!.blob, p.file!.name);
+    // A picture this browser cannot read (HEIC outside Safari) goes as a file.
+    if (photo) p.file = photo;
+    else p.kind = "file";
+    p.preparing = false;
   }
+  if (tooLarge(p.file!.blob)) Object.assign(p, { failed: true, error: "too_large" });
+  changed();
+  pump();
 }
 
 export function sendVoice(chat: number, recording: Outgoing, replyTo?: number) {

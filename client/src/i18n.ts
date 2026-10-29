@@ -83,6 +83,8 @@ const en = {
   dropHere: "Drop files here to send them",
   err_too_large: "The file is larger than 50 MB.",
   uploadLimit: "Upload limit reached: 200 MB per hour. Try again later.",
+  updateReady: "A new version of the app is ready.",
+  update: "Update",
 
   info: "Info",
   admin: "admin",
@@ -199,6 +201,8 @@ const ru: Strings = {
   dropHere: "Отпустите файлы, чтобы отправить",
   err_too_large: "Файл больше 50 МБ.",
   uploadLimit: "Достигнут предел загрузок: 200 МБ в час. Попробуйте позже.",
+  updateReady: "Готова новая версия приложения.",
+  update: "Обновить",
 
   info: "Информация",
   admin: "админ",
@@ -313,6 +317,8 @@ const uk: Strings = {
   dropHere: "Відпустіть файли, щоб надіслати",
   err_too_large: "Файл більший за 50 МБ.",
   uploadLimit: "Досягнуто ліміту завантажень: 200 МБ на годину. Спробуйте пізніше.",
+  updateReady: "Готова нова версія застосунку.",
+  update: "Оновити",
 
   info: "Інформація",
   admin: "адмін",

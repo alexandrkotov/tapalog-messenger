@@ -918,3 +918,25 @@ button.person:hover {
 .signout {
   margin-top: 32px;
 }
+
+.update-banner {
+  position: fixed;
+  left: 50%;
+  bottom: calc(76px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+  padding: 8px 8px 8px 14px;
+  border-radius: 10px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 14px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.2);
+}
+.update-banner button.link {
+  color: var(--accent);
+  font-weight: 600;
+}

@@ -59,9 +59,19 @@ export function App() {
   ) : null;
 
   return (
-    <main class={`layout${main ? " has-main" : ""}`}>
-      <ChatList />
-      {main ?? <section class="empty-main">{s.pickChat}</section>}
-    </main>
+    <>
+      {st.updateReady && (
+        <div class="update-banner" role="status" data-testid="update-ready">
+          {s.updateReady}
+          <button type="button" class="link" onClick={() => location.reload()}>
+            {s.update}
+          </button>
+        </div>
+      )}
+      <main class={`layout${main ? " has-main" : ""}`}>
+        <ChatList />
+        {main ?? <section class="empty-main">{s.pickChat}</section>}
+      </main>
+    </>
   );
 }

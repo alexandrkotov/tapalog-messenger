@@ -2,6 +2,7 @@ import { render } from "preact";
 import { useState } from "preact/hooks";
 import { App } from "./App";
 import { pickLang, t, type Lang } from "./i18n";
+import { setUpdateReady } from "./state";
 import { LangContext } from "./ui/common";
 import "./styles.css";
 
@@ -39,5 +40,9 @@ render(<Root />, document.getElementById("app")!);
 // The service worker keeps the app shell available offline. Only in a
 // production build: in `vite dev` it would cache files that keep changing.
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  // A new build takes over at once (sw.js skips waiting), but this page still
+  // runs the old code: offer a reload rather than reloading mid-sentence.
+  const hadController = navigator.serviceWorker.controller !== null;
+  navigator.serviceWorker.addEventListener("controllerchange", () => hadController && setUpdateReady());
   void navigator.serviceWorker.register("/sw.js");
 }
