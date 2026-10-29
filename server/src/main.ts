@@ -14,6 +14,7 @@ import { cleanUpExtracted, cloudflaredPath } from "./embedded";
 import { openInBrowser } from "./openInBrowser";
 import { startServer, type ServerHandle } from "./server";
 import { createInvite, ensureSetupInvite } from "./store/accounts";
+import { loadOrCreateVapid } from "./push";
 import { startTunnel, type Tunnel, type TunnelMode, type TunnelState } from "./tunnel";
 
 function isPortInUse(err: unknown): boolean {
@@ -109,6 +110,7 @@ async function main(): Promise<number> {
   }
   const schema = schemaVersion(db);
   console.log(`  Data:  ${dataDir}`);
+  const vapid = await loadOrCreateVapid(dataDir);
 
   const localUrl = `http://localhost:${args.port}`;
   const startedAt = new Date().toISOString();
@@ -124,6 +126,7 @@ async function main(): Promise<number> {
       adminKey,
       db,
       mediaDir: join(dataDir, "media"),
+      push: { vapid },
       publicUrl: initialPublicUrl,
       trustCfConnectingIp: tunnelMode !== null,
       health: { app: APP_ID, ok: true, version: pkg.version, schema },

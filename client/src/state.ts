@@ -3,6 +3,7 @@ import { useEffect, useState } from "preact/hooks";
 import { api, ApiError, deviceName } from "./api";
 import { isPhotoType, preparePhoto, tooLarge, upload, type Outgoing } from "./media";
 import * as offline from "./offline";
+import * as push from "./push";
 import { navigate } from "./router";
 
 /**
@@ -283,6 +284,7 @@ function signedOut() {
   savedOutbox.clear();
   void offline.clearAll();
   void caches?.delete(THUMB_CACHE).catch(() => {});
+  void push.forget();
   navigate("/", true);
   changed();
 }

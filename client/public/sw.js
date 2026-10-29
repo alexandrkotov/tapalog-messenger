@@ -56,3 +56,48 @@ self.addEventListener("fetch", (event) => {
   const key = req.mode === "navigate" ? "/" : req;
   event.respondWith(caches.match(key, { ignoreSearch: req.mode === "navigate" }).then((hit) => hit ?? fetch(req)));
 });
+
+// Web Push. The server sends who wrote and in which chat, never the text, so
+// the words are made here in the language the person chose. Browsers insist
+// that every push shows a notification. One notification per chat: a newer
+// message replaces the older one instead of piling up.
+const PUSH_TEXT = {
+  en: { text: "New message", image: "Photo", file: "File", voice: "Voice message" },
+  ru: { text: "Новое сообщение", image: "Фото", file: "Файл", voice: "Голосовое сообщение" },
+  uk: { text: "Нове повідомлення", image: "Фото", file: "Файл", voice: "Голосове повідомлення" },
+};
+
+self.addEventListener("push", (event) => {
+  let p;
+  try {
+    p = event.data.json();
+  } catch {
+    return;
+  }
+  const words = PUSH_TEXT[p.lang] ?? PUSH_TEXT.en;
+  const what = words[p.kind] ?? words.text;
+  const title = p.chat_title ?? p.from;
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: p.chat_title ? `${p.from}: ${what}` : what,
+      tag: `chat-${p.chat}`,
+      renotify: true,
+      icon: "/icons/icon-192.png",
+      data: { chat: p.chat },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const path = `/chat/${event.notification.data?.chat ?? ""}`;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
+      const open = windows.find((w) => new URL(w.url).origin === self.location.origin);
+      if (!open) return self.clients.openWindow(path);
+      // The open app moves to the chat itself, without a reload.
+      open.postMessage({ t: "open", path });
+      return open.focus();
+    }),
+  );
+});

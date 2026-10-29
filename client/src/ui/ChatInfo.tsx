@@ -36,6 +36,10 @@ export function ChatInfo({ chatId }: { chatId: number }) {
             <button disabled={!title.trim() || title.trim() === chat.title}>{s.rename}</button>
           </form>
         )}
+        <label class="check">
+          <input type="checkbox" checked={chat.muted} onChange={(e) => void apply("PATCH", "", { muted: e.currentTarget.checked })} />
+          {s.muteChat}
+        </label>
         {chat.kind === "group" && <h3>{fmt(s.members, { n: chat.members.length })}</h3>}
         <ul class="people">
           {chat.members.map((m) => (

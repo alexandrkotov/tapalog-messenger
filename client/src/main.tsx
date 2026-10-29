@@ -2,6 +2,7 @@ import { render } from "preact";
 import { useState } from "preact/hooks";
 import { App } from "./App";
 import { pickLang, t, type Lang } from "./i18n";
+import { navigate } from "./router";
 import { setUpdateReady } from "./state";
 import { LangContext } from "./ui/common";
 import "./styles.css";
@@ -45,4 +46,9 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
   const hadController = navigator.serviceWorker.controller !== null;
   navigator.serviceWorker.addEventListener("controllerchange", () => hadController && setUpdateReady());
   void navigator.serviceWorker.register("/sw.js");
+  // A tapped notification brings this window forward and asks it to open the chat.
+  navigator.serviceWorker.addEventListener("message", (e: MessageEvent) => {
+    const path = (e.data as { t?: string; path?: unknown } | null)?.path;
+    if (e.data?.t === "open" && typeof path === "string" && /^\/chat\/\d+$/.test(path)) navigate(path);
+  });
 }

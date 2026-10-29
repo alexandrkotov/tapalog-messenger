@@ -134,6 +134,16 @@ jobs:
             http://localhost:18443/api/auth/register | grep -q '"is_admin":true'
           curl -fsS -b cookies.txt http://localhost:18443/api/chats | grep -q '^\[\]$'
 
+          # Web Push keys are made on first start; an upload comes back byte for byte.
+          test -f messenger-data/vapid.json
+          curl -fsS -b cookies.txt http://localhost:18443/api/push/key | grep -q '"public_key"'
+          head -c 100000 /dev/urandom > upload.bin
+          MEDIA="$(curl -fsS -b cookies.txt -H "Origin: http://localhost:18443" -H "Content-Type: application/octet-stream" \
+            --data-binary @upload.bin 'http://localhost:18443/api/media?name=upload.bin' | grep -o '"id":"[A-Za-z0-9_-]*"' | cut -d'"' -f4)"
+          test -n "$MEDIA"
+          curl -fsS -b cookies.txt -o download.bin "http://localhost:18443/media/$MEDIA"
+          cmp upload.bin download.bin
+
           # Admin routes are closed without the key and stop the server with it.
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:18443/shutdown)" = 403
           curl -fsS -X POST -H "X-Admin-Key: $KEY" http://localhost:18443/shutdown

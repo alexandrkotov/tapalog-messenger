@@ -103,6 +103,8 @@ export interface ChatDto {
   version: number;
   last_message: MessageDto | null;
   unread: number;
+  /** Notifications for this chat are off, for the person asking. */
+  muted: boolean;
 }
 
 export interface MeDto {
@@ -149,6 +151,23 @@ export interface UpdateMeRequest {
 }
 
 export type CreateChatRequest = { kind: "direct"; user: number } | { kind: "group"; title: string; members: number[] };
+
+/** POST /api/push/subscribe: PushSubscription.toJSON() plus the interface language. */
+export interface PushSubscribeRequest {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  lang: string;
+}
+
+/** What a push carries. No message text: the push services in between see only that something happened. */
+export interface PushPayload {
+  chat: number;
+  /** Group title; null for a direct chat, where the sender's name is the title. */
+  chat_title: string | null;
+  from: string;
+  kind: MessageKind;
+  lang: string;
+}
 
 export interface CreateInviteRequest {
   max_uses?: number;

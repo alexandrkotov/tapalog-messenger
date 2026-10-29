@@ -294,6 +294,11 @@ small {
   gap: 8px;
   align-items: center;
 }
+.muted-mark {
+  font-size: 0.75em;
+  opacity: 0.6;
+}
+
 .chat-row-name {
   flex: 1;
   font-weight: 600;

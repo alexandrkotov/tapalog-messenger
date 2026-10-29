@@ -8,6 +8,7 @@
     "qrcode-generator": "1.4.4"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.4"
+    "@types/bun": "^1.4.4",
+    "http_ece": "1.2.0"
   }
 }

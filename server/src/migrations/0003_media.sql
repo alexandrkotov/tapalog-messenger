@@ -49,12 +49,14 @@ ALTER TABLE messages_new RENAME TO messages;
 CREATE INDEX messages_version ON messages(chat_id, version);
 CREATE INDEX messages_media ON messages(media_id) WHERE media_id IS NOT NULL;
 
--- One row per browser that allowed notifications. Signing the device out removes it.
+-- One row per browser that allowed notifications. Signing the device out
+-- removes it. lang is the interface language, for the notification's words.
 CREATE TABLE push_subscriptions (
   endpoint   TEXT    PRIMARY KEY,
   device_id  INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
   p256dh     TEXT    NOT NULL,
   auth       TEXT    NOT NULL,
+  lang       TEXT    NOT NULL DEFAULT 'en',
   created_at INTEGER NOT NULL
 ) STRICT;
 CREATE INDEX push_subscriptions_device ON push_subscriptions(device_id);

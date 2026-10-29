@@ -48,6 +48,11 @@ export function ChatList() {
                 <span class="chat-row-main">
                   <span class="chat-row-top">
                     <span class="chat-row-name">{name}</span>
+                    {chat.muted && (
+                      <span class="muted-mark" title={s.mutedChat} aria-label={s.mutedChat} data-testid="muted">
+                        🔕
+                      </span>
+                    )}
                     {(pending || last) && <span class="chat-row-time">{shortTime(pending?.at ?? last!.at, lang)}</span>}
                   </span>
                   <span class="chat-row-bottom">

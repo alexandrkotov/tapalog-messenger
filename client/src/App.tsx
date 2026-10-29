@@ -1,19 +1,24 @@
 import { useEffect } from "preact/hooks";
+import { resync } from "./push";
 import { match, usePath } from "./router";
 import { boot, useAppState } from "./state";
 import { AlreadySignedIn, Login, Register } from "./ui/Auth";
 import { ChatInfo } from "./ui/ChatInfo";
 import { ChatList } from "./ui/ChatList";
 import { ChatView } from "./ui/ChatView";
-import { useS } from "./ui/common";
+import { useLang } from "./ui/common";
 import { NewChat } from "./ui/NewChat";
 import { Settings } from "./ui/Settings";
 
 export function App() {
-  const s = useS();
+  const { s, lang } = useLang();
   const st = useAppState();
   const path = usePath();
   useEffect(() => void boot(), []);
+  // Keeps the server's copy of this device's push address current, in the chosen language.
+  useEffect(() => {
+    if (st.phase === "ready") void resync(lang);
+  }, [st.phase, lang]);
 
   const invite = match("/invite/:code", path);
 

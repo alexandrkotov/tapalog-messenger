@@ -2,6 +2,7 @@ import type { DeviceDto, InviteDto, MeDto } from "@tapalog-messenger/shared";
 import { useEffect, useState } from "preact/hooks";
 import { api, ApiError } from "../api";
 import { fmt, LANGS, type Lang } from "../i18n";
+import { pushState, turnOff, turnOn, type PushState } from "../push";
 import { logout, setMe, useAppState } from "../state";
 import { errorText, Link, shortTime, useLang } from "./common";
 
@@ -15,6 +16,8 @@ export function Settings() {
   const [devices, setDevices] = useState<DeviceDto[]>([]);
   const [invites, setInvites] = useState<InviteDto[]>([]);
   const [copied, setCopied] = useState("");
+  const [push, setPush] = useState<PushState | null>(null);
+  const [pushBusy, setPushBusy] = useState(false);
 
   const loadDevices = () => api<DeviceDto[]>("GET", "/devices").then(setDevices).catch(() => {});
   const loadInvites = async () => {
@@ -23,7 +26,18 @@ export function Settings() {
   useEffect(() => {
     void loadDevices();
     void loadInvites();
+    void pushState().then(setPush);
   }, []);
+  const togglePush = async () => {
+    setPushBusy(true);
+    try {
+      setPush(await (push === "on" ? turnOff() : turnOn(lang)));
+    } catch {
+      setPush(await pushState());
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   const save = async (body: unknown) => {
     setNote("");
@@ -77,6 +91,20 @@ export function Settings() {
             </option>
           ))}
         </select>
+
+        {push && (
+          <>
+            <h3>{s.notifications}</h3>
+            <p class="hint" data-testid="push-state" data-state={push}>
+              {{ on: s.notifyOn, off: s.notifyOff, denied: s.notifyDenied, "needs-install": s.notifyInstall, unsupported: s.notifyUnsupported }[push]}
+            </p>
+            {(push === "on" || push === "off") && (
+              <button type="button" disabled={pushBusy} onClick={() => void togglePush()}>
+                {push === "on" ? s.turnOff : s.turnOn}
+              </button>
+            )}
+          </>
+        )}
 
         <h3>{s.devices}</h3>
         <ul class="list">

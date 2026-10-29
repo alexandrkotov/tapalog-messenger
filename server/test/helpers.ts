@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { APP_ID, type ServerFrame } from "@tapalog-messenger/shared";
 import { migrate } from "../src/db";
-import { startServer, type ServerHandle } from "../src/server";
+import { startServer, type ServerHandle, type ServerOptions } from "../src/server";
 import { createInvite } from "../src/store/accounts";
 
 /** A real server on a free port with an in-memory database. */
-export function testServer(opts: { publicUrl?: string; trustCfConnectingIp?: boolean } = {}) {
+export function testServer(opts: { publicUrl?: string; trustCfConnectingIp?: boolean; push?: ServerOptions["push"] } = {}) {
   const db = new Database(":memory:", { strict: true });
   db.run("PRAGMA foreign_keys = ON");
   migrate(db);
@@ -20,6 +20,7 @@ export function testServer(opts: { publicUrl?: string; trustCfConnectingIp?: boo
     assets: {},
     publicUrl: opts.publicUrl ?? null,
     trustCfConnectingIp: opts.trustCfConnectingIp,
+    push: opts.push,
     health: { app: APP_ID, ok: true, version: "0", schema: 3 },
     status: () => ({ version: "0", schema: 3, localUrl: "", publicUrl: null, setupInviteUrl: null, tunnel: null, addressChangedFrom: null, dataDir: "", startedAt: "" }),
   });

@@ -4,10 +4,13 @@ A self-hosted web messenger whose whole server is one executable file.
 Run it from any folder with nothing else installed; the PWA client is built in,
 and all state lives in a `messenger-data/` folder next to the binary.
 
-Status: Stage 1 — text chat. Sign-up by invite link, direct chats and groups,
-replies, edits, deletes, reactions, sent / delivered / read ticks, typing and
-online status, several devices per account, catch-up after a lost connection.
-Photos, voice messages and push notifications come next.
+Status: Stage 2 — media and PWA. Sign-up by invite link, direct chats and
+groups, replies, edits, deletes, reactions, sent / delivered / read ticks,
+typing and online status, several devices per account, catch-up after a lost
+connection. Photos, files (up to 50 MB) and voice messages; recent chats and an
+outbox that work without a network; push notifications while the app is closed
+(on iPhone and iPad only from the Home Screen app). Profile pictures and search
+come next.
 
 - Stack: Bun + TypeScript, `bun build --compile` for Windows, Linux and macOS
 - Storage: SQLite (WAL) via `bun:sqlite`
@@ -27,6 +30,10 @@ tapalog-messenger [--port 8443] [--data <dir>] [--no-open]
 On start it opens a status page in the browser. That page and the Stop button
 need a random admin key created on each start; the link with the key is printed
 to the console and the key is saved in `messenger-data/admin.key`.
+
+Uploads are kept in `messenger-data/media/`. The keys that sign push
+notifications are made on first start and kept in `messenger-data/vapid.json`;
+losing them only means everyone turns notifications on again.
 
 While there are no accounts yet, the status page shows a link for creating the
 first one, which becomes the admin. The admin makes invite links for everyone

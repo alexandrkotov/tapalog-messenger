@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { Server, ServerWebSocket } from "bun";
-import { parseClientFrame, type ClientFrame, type ServerFrame } from "@tapalog-messenger/shared";
+import { parseClientFrame, type ClientFrame, type MessageDto, type ServerFrame } from "@tapalog-messenger/shared";
 import { RateLimiter } from "./http";
 import { setLastSeen } from "./store/accounts";
 import * as chats from "./store/chats";
@@ -30,6 +30,8 @@ export class Hub {
   private frames = new RateLimiter(120, 10_000);
   /** New messages, per user across all their tabs. */
   private sends = new RateLimiter(30, 10_000);
+  /** Told about every new message after it went out to open tabs: Web Push for the rest. */
+  onNewMessage: ((msg: MessageDto) => void) | null = null;
 
   constructor(
     private readonly db: Database,
@@ -144,7 +146,9 @@ export class Hub {
         });
         if (typeof res === "string") return send({ t: "error", code: res === "bad_request" ? "bad_request" : "forbidden", ref: f.client_id });
         send({ t: "msg.ack", client_id: f.client_id, chat: f.chat, seq: res.msg.seq, at: res.msg.at });
-        if (!res.duplicate) this.publish(chats.memberIds(this.db, f.chat), { t: "msg.new", msg: res.msg });
+        if (res.duplicate) return;
+        this.publish(chats.memberIds(this.db, f.chat), { t: "msg.new", msg: res.msg });
+        this.onNewMessage?.(res.msg);
         return;
       }
 

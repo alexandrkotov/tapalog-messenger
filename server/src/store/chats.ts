@@ -117,6 +117,11 @@ function chatDto(db: Database, chat: ChatRow, forUserId: number, isOnline: IsOnl
     )
     .all({ chatId: chat.id }) as (Omit<MemberDto, "online">)[];
   const me = members.find((m) => m.id === forUserId);
+  const mutedUntil = (
+    db.query("SELECT muted_until FROM chat_members WHERE chat_id = $chatId AND user_id = $userId").get({ chatId: chat.id, userId: forUserId }) as {
+      muted_until: number | null;
+    } | null
+  )?.muted_until;
   const lastRow = db
     .query("SELECT * FROM messages WHERE chat_id = $chatId ORDER BY seq DESC LIMIT 1")
     .get({ chatId: chat.id }) as MessageRow | null;
@@ -137,6 +142,7 @@ function chatDto(db: Database, chat: ChatRow, forUserId: number, isOnline: IsOnl
     version: chat.version,
     last_message: lastRow ? withReactions(db, [lastRow])[0]! : null,
     unread,
+    muted: mutedUntil != null && mutedUntil > Date.now(),
   };
 }
 
@@ -244,6 +250,25 @@ export function setRole(db: Database, chatId: number, actor: number, userId: num
   }
   const changed = db.query("UPDATE chat_members SET role = $role WHERE chat_id = $chatId AND user_id = $userId").run({ chatId, userId, role }).changes;
   return changed > 0 ? true : "not_found";
+}
+
+/** Mutes are open-ended: "until" is far in the future. */
+const MUTED_FOREVER = 8_640_000_000_000_000;
+
+export function setMuted(db: Database, chatId: number, userId: number, muted: boolean): true | Refusal {
+  const changed = db
+    .query("UPDATE chat_members SET muted_until = $until WHERE chat_id = $chatId AND user_id = $userId")
+    .run({ chatId, userId, until: muted ? MUTED_FOREVER : null }).changes;
+  return changed > 0 ? true : "not_found";
+}
+
+/** The members to wake about a new message: everyone but its sender who has not muted the chat. */
+export function membersToNotify(db: Database, chatId: number, senderId: number, now: number): number[] {
+  return (
+    db
+      .query("SELECT user_id FROM chat_members WHERE chat_id = $chatId AND user_id != $senderId AND (muted_until IS NULL OR muted_until <= $now)")
+      .all({ chatId, senderId, now }) as { user_id: number }[]
+  ).map((r) => r.user_id);
 }
 
 export function renameGroup(db: Database, chatId: number, actor: number, title: string): true | Refusal {

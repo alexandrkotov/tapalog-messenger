@@ -2,6 +2,8 @@ import type { Database } from "bun:sqlite";
 import { LIMITS, USERNAME_RE, type InviteDto, type MeDto } from "@tapalog-messenger/shared";
 import { authenticate, clearSessionCookie, sessionCookie, type Origins, type Session } from "./auth";
 import type { createFiles } from "./files";
+import type { Notifier } from "./notify";
+import * as subscriptions from "./store/push";
 import { error, json, RateLimiter, readJson } from "./http";
 import type { Hub } from "./hub";
 import * as accounts from "./store/accounts";
@@ -13,6 +15,8 @@ export interface ApiContext {
   db: Database;
   hub: Hub;
   files: ReturnType<typeof createFiles>;
+  /** Null when Web Push is not set up (tests that do not need it). */
+  push: Notifier | null;
   origins: Origins;
   /** Base for invite links: the public address if there is one, else the local one. */
   inviteBase: () => string;
@@ -141,7 +145,13 @@ export function createApi(ctx: ApiContext) {
     if (rest.length === 0) {
       if (req.method === "GET") return json(chats.getChat(db, chatId, s.user.id, hub.isOnline));
       if (req.method === "PATCH") {
-        const title = str((await readJson(req))?.title, LIMITS.groupTitle);
+        const body = await readJson(req);
+        // Muting is one person's own setting: only their view of the chat changes.
+        if (typeof body?.muted === "boolean") {
+          const res = chats.setMuted(db, chatId, s.user.id, body.muted);
+          return res === true ? json(chats.getChat(db, chatId, s.user.id, hub.isOnline)) : error(res);
+        }
+        const title = str(body?.title, LIMITS.groupTitle);
         return title ? done(chats.renameGroup(db, chatId, s.user.id, title)) : error("bad_request");
       }
     }
@@ -166,6 +176,25 @@ export function createApi(ctx: ApiContext) {
       }
     }
     return error("not_found");
+  }
+
+  async function pushSubscription(req: Request, s: Session): Promise<Response> {
+    const body = await readJson(req);
+    const endpoint = typeof body?.endpoint === "string" && body.endpoint.length <= 2048 ? body.endpoint : null;
+    if (!ctx.push || !endpoint) return error("bad_request");
+    if (req.method === "DELETE") {
+      subscriptions.deleteSubscription(db, s.user.id, endpoint);
+      return json({ ok: true });
+    }
+    const keys = body?.keys as { p256dh?: unknown; auth?: unknown } | undefined;
+    const bytes = (v: unknown) => (typeof v === "string" && /^[\w-]+=*$/.test(v) ? Buffer.from(v, "base64url") : null);
+    const p256dh = bytes(keys?.p256dh);
+    const auth = bytes(keys?.auth);
+    // A browser's key is an uncompressed P-256 point (65 bytes from 0x04); its secret is 16 bytes.
+    if (!ctx.push.allowEndpoint(endpoint) || p256dh?.length !== 65 || p256dh[0] !== 4 || auth?.length !== 16) return error("bad_request");
+    const lang = ["en", "ru", "uk"].includes(body?.lang as string) ? (body!.lang as string) : "en";
+    subscriptions.saveSubscription(db, s.deviceId, { endpoint, p256dh: keys!.p256dh as string, auth: keys!.auth as string, lang }, ctx.now());
+    return json({ ok: true }, 201);
   }
 
   async function invites(req: Request, s: Session, code: string | undefined): Promise<Response> {
@@ -219,6 +248,8 @@ export function createApi(ctx: ApiContext) {
     }
     if (parts[0] === "invites" && parts.length <= 2) return invites(req, s, parts[1]);
     if (route === "media" && req.method === "POST") return ctx.files.upload(req, url, s);
+    if (route === "push/key" && req.method === "GET") return ctx.push ? json({ public_key: ctx.push.publicKey }) : error("not_found");
+    if (route === "push/subscribe" && (req.method === "POST" || req.method === "DELETE")) return pushSubscription(req, s);
     if (parts[0] === "media" && parts[2] === "thumb" && parts.length === 3 && req.method === "PUT") return ctx.files.putThumb(req, parts[1]!, s);
     return error("not_found");
   };

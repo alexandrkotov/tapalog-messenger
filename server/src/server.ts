@@ -4,6 +4,8 @@ import { LIMITS } from "@tapalog-messenger/shared";
 import { keyMatches } from "./adminKey";
 import { createApi, inviteDto } from "./api";
 import { createFiles } from "./files";
+import { createNotifier } from "./notify";
+import type { Vapid } from "./push";
 import { authenticate, originAllowed, originsFor } from "./auth";
 import { APP_CSP, error, json, text, withHeaders } from "./http";
 import { Hub, type SocketData } from "./hub";
@@ -23,6 +25,8 @@ export interface ServerOptions {
   db: Database;
   /** Where uploads are stored: messenger-data/media. */
   mediaDir: string;
+  /** Web Push: the server's keys, and for tests a stand-in push service. Off when absent. */
+  push?: { vapid: Vapid; allowEndpoint?: (endpoint: string) => boolean; fetch?: typeof fetch };
   /** The HTTPS address the server is reachable at from outside, e.g. https://messenger.tapalog.com. */
   publicUrl?: string | null;
   /**
@@ -79,7 +83,11 @@ export function startServer(opts: ServerOptions): ServerHandle {
   let publicUrl = opts.publicUrl ?? null;
   const inviteBase = () => publicUrl ?? `http://localhost:${port}`;
   const files = createFiles({ db: opts.db, mediaDir: opts.mediaDir, now });
-  const handleApi = createApi({ db: opts.db, hub, files, origins, inviteBase, now });
+  const push = opts.push
+    ? createNotifier({ db: opts.db, ...opts.push, subject: () => publicUrl ?? "https://localhost", isOnline: hub.isOnline, now })
+    : null;
+  if (push) hub.onNewMessage = (msg) => void push.newMessage(msg);
+  const handleApi = createApi({ db: opts.db, hub, files, push, origins, inviteBase, now });
   const sweep = () => {
     try {
       collectGarbage(opts.db, opts.mediaDir, now());
