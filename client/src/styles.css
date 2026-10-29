@@ -973,6 +973,27 @@ button.person:hover {
   display: flex;
   flex: none;
 }
+.row-actions.wrap {
+  flex-wrap: wrap;
+  margin-left: -6px;
+}
+.admin-user {
+  align-items: flex-start;
+}
+.admin-user.blocked strong {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+.reset-out {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  margin-top: 4px;
+}
+.reset-out code {
+  overflow-wrap: anywhere;
+}
 .list li {
   display: flex;
   align-items: center;

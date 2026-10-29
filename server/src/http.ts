@@ -44,6 +44,7 @@ const ERROR_STATUS: Record<ErrorCode, number> = {
   too_short: 400,
   blocked: 403,
   reset_invalid: 403,
+  last_admin: 409,
   rate_limited: 429,
 };
 

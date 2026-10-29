@@ -11,6 +11,7 @@ import { APP_CSP, error, json, text, withHeaders } from "./http";
 import { Hub, type SocketData } from "./hub";
 import { createInvite } from "./store/accounts";
 import { collectGarbage } from "./store/media";
+import { diskUsage } from "./disk";
 import { renderStatusPage, tunnelText, type StatusInfo } from "./statusPage";
 
 /** URL path → file the binary can read (an embedded `$bunfs` path when compiled). */
@@ -87,7 +88,8 @@ export function startServer(opts: ServerOptions): ServerHandle {
     ? createNotifier({ db: opts.db, ...opts.push, subject: () => publicUrl ?? "https://localhost", isDeviceOnline: hub.isDeviceOnline, now })
     : null;
   if (push) hub.onNewMessage = (msg) => void push.newMessage(msg);
-  const handleApi = createApi({ db: opts.db, hub, files, push, origins, inviteBase, now });
+  const disk = () => diskUsage(opts.db.filename, opts.mediaDir);
+  const handleApi = createApi({ db: opts.db, hub, files, push, origins, inviteBase, disk, now });
   const sweep = () => {
     try {
       collectGarbage(opts.db, opts.mediaDir, now());
@@ -135,7 +137,7 @@ export function startServer(opts: ServerOptions): ServerHandle {
         }
         if (pathname === "/status") {
           const nonce = crypto.randomUUID().replaceAll("-", "");
-          return withHeaders(new Response(renderStatusPage(opts.status(), nonce), { headers: { "Content-Type": "text/html; charset=utf-8" } }), {
+          return withHeaders(new Response(renderStatusPage({ ...opts.status(), disk: disk() }, nonce), { headers: { "Content-Type": "text/html; charset=utf-8" } }), {
             "Cache-Control": "no-store",
             "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'`,
           });

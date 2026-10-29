@@ -51,4 +51,12 @@ export class OwnServer {
   invite() {
     return inviteCode(this.url, this.dataDir);
   }
+
+  /** The first account's invite from the status page, which makes an administrator; only while there are no accounts. */
+  async adminInvite(): Promise<string> {
+    const key = readFileSync(join(this.dataDir, "admin.key"), "utf-8").trim();
+    const status = (await (await fetch(`${this.url}/status.json`, { headers: { "X-Admin-Key": key } })).json()) as { setupInviteUrl: string | null };
+    if (!status.setupInviteUrl) throw new Error("the server already has accounts");
+    return status.setupInviteUrl.split("/").at(-1)!;
+  }
 }

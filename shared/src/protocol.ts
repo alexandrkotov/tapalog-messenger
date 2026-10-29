@@ -129,6 +129,37 @@ export interface MeDto {
   device_id: number;
 }
 
+/** One account as an administrator sees it in the «Server» section. */
+export interface AdminUserDto extends UserDto {
+  is_admin: boolean;
+  blocked: boolean;
+  online: boolean;
+  created_at: number;
+  last_active_at: number | null;
+  devices: number;
+}
+
+/** Where the data folder's space goes. Free and total are for the disk it is on; null where that cannot be read. */
+export interface DiskUsageDto {
+  db_bytes: number;
+  media_bytes: number;
+  media_files: number;
+  free_bytes: number | null;
+  total_bytes: number | null;
+}
+
+/** A one-time link for setting a new password; the administrator sends it on. */
+export interface PasswordResetDto {
+  url: string;
+  expires_at: number;
+}
+
+/** GET /api/auth/reset/{code}: whose password the link sets. */
+export interface ResetInfoDto {
+  username: string;
+  display_name: string;
+}
+
 export interface DeviceDto {
   id: number;
   name: string;
@@ -210,7 +241,9 @@ export type ErrorCode =
   /** The account is blocked by an administrator. */
   | "blocked"
   /** A password-reset link that is unknown, used or expired. */
-  | "reset_invalid";
+  | "reset_invalid"
+  /** The change would leave the server without an administrator. */
+  | "last_admin";
 
 export interface ErrorResponse {
   error: ErrorCode;

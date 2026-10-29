@@ -258,6 +258,12 @@ export async function login(username: string, password: string) {
   await afterSignIn();
 }
 
+/** Sets a new password through an administrator's reset link, and signs in. */
+export async function resetPassword(code: string, password: string) {
+  state.me = await api<MeDto>("POST", "/auth/reset", { code, password, device_name: deviceName() });
+  await afterSignIn();
+}
+
 export async function register(invite: string, username: string, displayName: string, password: string) {
   state.me = await api<MeDto>("POST", "/auth/register", { invite, username, display_name: displayName, password, device_name: deviceName() });
   await afterSignIn();

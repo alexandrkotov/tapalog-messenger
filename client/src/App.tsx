@@ -2,12 +2,13 @@ import { useEffect } from "preact/hooks";
 import { resync } from "./push";
 import { match, usePath } from "./router";
 import { boot, useAppState } from "./state";
-import { AlreadySignedIn, Login, Register } from "./ui/Auth";
+import { AlreadySignedIn, Login, Register, ResetPassword } from "./ui/Auth";
 import { ChatInfo } from "./ui/ChatInfo";
 import { ChatList } from "./ui/ChatList";
 import { ChatView } from "./ui/ChatView";
 import { useLang } from "./ui/common";
 import { NewChat } from "./ui/NewChat";
+import { ServerAdmin } from "./ui/ServerAdmin";
 import { Settings } from "./ui/Settings";
 
 export function App() {
@@ -21,6 +22,7 @@ export function App() {
   }, [st.phase, lang]);
 
   const invite = match("/invite/:code", path);
+  const reset = match("/reset/:code", path);
 
   if (st.phase === "loading") {
     return (
@@ -46,9 +48,9 @@ export function App() {
     );
   }
   if (st.phase === "signed-out") {
-    return <main class="center">{invite ? <Register invite={invite.code!} /> : <Login />}</main>;
+    return <main class="center">{invite ? <Register invite={invite.code!} /> : reset ? <ResetPassword code={reset.code!} /> : <Login />}</main>;
   }
-  if (invite) return <main class="center">{<AlreadySignedIn />}</main>;
+  if (invite || reset) return <main class="center">{<AlreadySignedIn />}</main>;
 
   // Signed in: the list on the left, the open thing on the right. On a phone only one shows.
   const chat = match("/chat/:id", path);
@@ -61,6 +63,8 @@ export function App() {
     <NewChat />
   ) : path === "/settings" ? (
     <Settings />
+  ) : path === "/server" && st.me?.user.is_admin ? (
+    <ServerAdmin />
   ) : null;
 
   return (

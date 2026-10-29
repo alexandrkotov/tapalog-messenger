@@ -69,6 +69,11 @@ export class Hub {
     for (const set of this.sockets.values()) for (const ws of set) if (ws.data.deviceId === deviceId) ws.close(4001, "signed out");
   }
 
+  /** Closes every tab of a user who was just blocked or had their password reset. */
+  disconnectUser(userId: number) {
+    for (const ws of this.sockets.get(userId) ?? []) ws.close(4001, "signed out");
+  }
+
   /** On shutdown: tell clients to reconnect later rather than treat it as an error. */
   closeAll() {
     for (const set of this.sockets.values()) for (const ws of set) ws.close(1001, "server stopping");

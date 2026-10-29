@@ -58,7 +58,7 @@ export function searchUsers(db: Database, q: string, excludeId: number, limit = 
   const rows = db
     .query(
       `SELECT id, username, display_name, avatar_media_id FROM users
-       WHERE id != $excludeId AND (username LIKE $pattern ESCAPE '\\' OR display_name LIKE $pattern ESCAPE '\\')
+       WHERE id != $excludeId AND blocked_at IS NULL AND (username LIKE $pattern ESCAPE '\\' OR display_name LIKE $pattern ESCAPE '\\')
        ORDER BY display_name COLLATE NOCASE LIMIT $limit`,
     )
     .all({ excludeId, pattern, limit }) as UserRow[];
@@ -99,12 +99,91 @@ export function sessionByToken(db: Database, token: string): { user: UserRow; de
   const row = db
     .query(
       `SELECT d.id AS device_id, d.last_active_at, u.* FROM devices d JOIN users u ON u.id = d.user_id
-       WHERE d.session_token_hash = $hash`,
+       WHERE d.session_token_hash = $hash AND u.blocked_at IS NULL`,
     )
     .get({ hash: hashToken(token) }) as (UserRow & { device_id: number; last_active_at: number }) | null;
   if (!row) return null;
   const { device_id, last_active_at, ...user } = row;
   return { user, deviceId: device_id, lastActiveAt: last_active_at };
+}
+
+// ---- Administration ---------------------------------------------------------
+
+export interface AdminUserRow extends UserRow {
+  devices: number;
+  /** The latest of the last WebSocket close and any device's last request. */
+  last_active_at: number | null;
+}
+
+export function listUsersForAdmin(db: Database): AdminUserRow[] {
+  return db
+    .query(
+      `SELECT u.*, count(d.id) AS devices, max(coalesce(u.last_seen_at, 0), coalesce(max(d.last_active_at), 0)) AS last_active_at
+       FROM users u LEFT JOIN devices d ON d.user_id = u.id
+       GROUP BY u.id ORDER BY u.display_name COLLATE NOCASE, u.id`,
+    )
+    .all() as AdminUserRow[];
+}
+
+/** Administrators who are not blocked: the ones who can still run the server. */
+export function countActiveAdmins(db: Database): number {
+  return (db.query("SELECT count(*) AS n FROM users WHERE is_admin = 1 AND blocked_at IS NULL").get() as { n: number }).n;
+}
+
+export function setAdmin(db: Database, userId: number, isAdmin: boolean): void {
+  db.query("UPDATE users SET is_admin = $isAdmin WHERE id = $userId").run({ userId, isAdmin: isAdmin ? 1 : 0 });
+}
+
+/**
+ * Blocks (at `at`) or unblocks (null). Blocking signs every device out, which
+ * also drops its push subscriptions, and voids any password-reset link.
+ */
+export function setBlocked(db: Database, userId: number, at: number | null): void {
+  db.transaction(() => {
+    db.query("UPDATE users SET blocked_at = $at WHERE id = $userId").run({ userId, at });
+    if (at === null) return;
+    db.query("DELETE FROM devices WHERE user_id = $userId").run({ userId });
+    db.query("DELETE FROM password_resets WHERE user_id = $userId").run({ userId });
+  })();
+}
+
+/** A one-time code for setting a new password, replacing any earlier one for this person. Only its hash is stored. */
+export function createPasswordReset(db: Database, userId: number, createdBy: number, ttlMs: number, now: number): { code: string; expiresAt: number } {
+  const code = randomBytes(24).toString("base64url");
+  const expiresAt = now + ttlMs;
+  db.transaction(() => {
+    db.query("DELETE FROM password_resets WHERE user_id = $userId").run({ userId });
+    db.query("INSERT INTO password_resets (code_hash, user_id, created_by, created_at, expires_at) VALUES ($hash, $userId, $createdBy, $now, $expiresAt)").run({
+      hash: hashToken(code),
+      userId,
+      createdBy,
+      now,
+      expiresAt,
+    });
+  })();
+  return { code, expiresAt };
+}
+
+/** Whose password a reset code is for, while it is unused and in time. */
+export function userByResetCode(db: Database, code: string, now: number): UserRow | null {
+  return db
+    .query(
+      `SELECT u.* FROM password_resets r JOIN users u ON u.id = r.user_id
+       WHERE r.code_hash = $hash AND r.expires_at > $now AND u.blocked_at IS NULL`,
+    )
+    .get({ hash: hashToken(code), now }) as UserRow | null;
+}
+
+/** Sets the new password and signs out every device; the code is then used up. Null when the code is no good. */
+export function resetPassword(db: Database, code: string, passwordHash: string, now: number): UserRow | null {
+  return db.transaction(() => {
+    const user = userByResetCode(db, code, now);
+    if (!user) return null;
+    db.query("UPDATE users SET password_hash = $passwordHash WHERE id = $id").run({ id: user.id, passwordHash });
+    db.query("DELETE FROM devices WHERE user_id = $id").run({ id: user.id });
+    db.query("DELETE FROM password_resets WHERE user_id = $id").run({ id: user.id });
+    return user;
+  })();
 }
 
 export function touchDevice(db: Database, deviceId: number, now: number): void {

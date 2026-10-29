@@ -1,3 +1,4 @@
+import type { DiskUsageDto } from "@tapalog-messenger/shared";
 import qrcode from "qrcode-generator";
 import type { TunnelState } from "./tunnel";
 
@@ -15,6 +16,25 @@ export interface StatusInfo {
   addressChangedFrom: string | null;
   dataDir: string;
   startedAt: string;
+  /** Filled in by the server when the page is shown. */
+  disk?: DiskUsageDto;
+}
+
+/** 1536 → "1.5 KB". */
+export function formatBytes(n: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i++;
+  }
+  return `${i === 0 ? n : n.toFixed(1)} ${units[i]}`;
+}
+
+function diskText(d: DiskUsageDto): string {
+  const parts = [`database ${formatBytes(d.db_bytes)}`, `files ${formatBytes(d.media_bytes)} (${d.media_files})`];
+  if (d.free_bytes !== null) parts.push(`free on disk ${formatBytes(d.free_bytes)}`);
+  return parts.join(" · ");
 }
 
 /** Scannable from a phone: the quickest way to open the messenger there. */
@@ -50,6 +70,7 @@ export function renderStatusPage(info: StatusInfo, nonce: string): string {
     ...(info.tunnel ? ([["Internet access", `<span id="tunnel">${escapeHtml(tunnelText(info.tunnel))}</span>`]] as [string, string][]) : []),
     ["Address on this computer", link(info.localUrl)],
     ["Data folder", `<code>${escapeHtml(info.dataDir)}</code>`],
+    ...(info.disk ? ([["Space used", escapeHtml(diskText(info.disk))]] as [string, string][]) : []),
     ["Version", `${escapeHtml(info.version)} · schema ${info.schema}`],
     ["Running since", escapeHtml(info.startedAt)],
   ];

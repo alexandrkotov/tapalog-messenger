@@ -1,4 +1,4 @@
-import type { DeviceDto, InviteDto, MeDto } from "@tapalog-messenger/shared";
+import type { DeviceDto, MeDto } from "@tapalog-messenger/shared";
 import { useEffect, useState } from "preact/hooks";
 import { api, ApiError } from "../api";
 import { fmt, LANGS, type Lang } from "../i18n";
@@ -15,18 +15,12 @@ export function Settings() {
   const [next, setNext] = useState("");
   const [note, setNote] = useState("");
   const [devices, setDevices] = useState<DeviceDto[]>([]);
-  const [invites, setInvites] = useState<InviteDto[]>([]);
-  const [copied, setCopied] = useState("");
   const [push, setPush] = useState<PushState | null>(null);
   const [pushBusy, setPushBusy] = useState(false);
 
   const loadDevices = () => api<DeviceDto[]>("GET", "/devices").then(setDevices).catch(() => {});
-  const loadInvites = async () => {
-    if (me.user.is_admin) await api<InviteDto[]>("GET", "/invites").then(setInvites).catch(() => {});
-  };
   useEffect(() => {
     void loadDevices();
-    void loadInvites();
     void pushState().then(setPush);
   }, []);
   const togglePush = async () => {
@@ -50,10 +44,6 @@ export function Settings() {
     } catch (err) {
       setNote(errorText(s, err instanceof ApiError ? err.code : "generic"));
     }
-  };
-  const copy = async (url: string) => {
-    await navigator.clipboard?.writeText(url).catch(() => {});
-    setCopied(url);
   };
 
   return (
@@ -127,27 +117,11 @@ export function Settings() {
 
         {me.user.is_admin && (
           <>
-            <h3>{s.invites}</h3>
-            <p class="hint">{s.inviteHint}</p>
-            <button type="button" data-testid="create-invite" onClick={() => void api<InviteDto>("POST", "/invites", {}).then(loadInvites)}>
-              {s.createInvite}
-            </button>
-            <ul class="list">
-              {invites.map((i) => (
-                <li key={i.code}>
-                  <span>
-                    <code data-testid="invite-url">{i.url}</code>
-                    <small>{fmt(s.usesLeft, { used: i.used_count, max: i.max_uses })}</small>
-                  </span>
-                  <button type="button" class="link" onClick={() => void copy(i.url)}>
-                    {copied === i.url ? s.copied : s.copy}
-                  </button>
-                  <button type="button" class="link danger" onClick={() => void api("DELETE", `/invites/${i.code}`).then(loadInvites)}>
-                    {s.remove}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <h3>{s.server}</h3>
+            <p class="hint">{s.serverHint}</p>
+            <Link href="/server" class="button" data-testid="server-section">
+              {s.server}
+            </Link>
           </>
         )}
 

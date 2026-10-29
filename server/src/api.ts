@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
-import { LIMITS, USERNAME_RE, type InviteDto, type MeDto } from "@tapalog-messenger/shared";
+import { LIMITS, USERNAME_RE, type DiskUsageDto, type InviteDto, type MeDto, type ResetInfoDto } from "@tapalog-messenger/shared";
+import { createAdminApi } from "./admin";
 import { authenticate, clearSessionCookie, sessionCookie, type Origins, type Session } from "./auth";
 import type { createFiles } from "./files";
 import type { Notifier } from "./notify";
@@ -22,6 +23,8 @@ export interface ApiContext {
   origins: Origins;
   /** Base for invite links: the public address if there is one, else the local one. */
   inviteBase: () => string;
+  /** Room taken by the data folder, for the «Server» section. */
+  disk: () => DiskUsageDto;
   now: () => number;
 }
 
@@ -56,6 +59,9 @@ export function createApi(ctx: ApiContext) {
     authLimiter.record(ip, ctx.now());
     return error(code);
   };
+  const adminRoute = createAdminApi(ctx);
+  /** Someone others may start a chat with or add to a group: an account that is not blocked. */
+  const reachable = (id: number) => accounts.getUser(db, id)?.blocked_at === null;
 
   async function register(req: Request, ip: string): Promise<Response> {
     if (!authLimiter.allowed(ip, ctx.now())) return error("rate_limited");
@@ -90,6 +96,29 @@ export function createApi(ctx: ApiContext) {
     const user = username ? accounts.findUserByName(db, username) : null;
     const ok = await Bun.password.verify(password, user?.password_hash ?? DUMMY_HASH);
     if (!user || !ok) return failed(ip, "wrong_password");
+    if (user.blocked_at !== null) return error("blocked");
+    const { deviceId, token } = accounts.createDevice(db, user.id, deviceName, ctx.now());
+    return json(me({ user, deviceId }), 200, { "Set-Cookie": sessionCookie(req, ctx.origins, token) });
+  }
+
+  /** GET: whose password a reset link sets. POST {code, password}: sets it, signs out every device, and signs in this one. */
+  async function passwordReset(req: Request, ip: string, code: string | undefined): Promise<Response> {
+    if (!authLimiter.allowed(ip, ctx.now())) return error("rate_limited");
+    if (req.method === "GET" && code) {
+      const user = accounts.userByResetCode(db, code, ctx.now());
+      if (!user) return failed(ip, "reset_invalid");
+      const dto: ResetInfoDto = { username: user.username, display_name: user.display_name };
+      return json(dto);
+    }
+    const body = await readJson(req);
+    const resetCode = str(body?.code, 100);
+    const password = typeof body?.password === "string" ? body.password : "";
+    const deviceName = str(body?.device_name, LIMITS.deviceName) ?? "Browser";
+    if (!resetCode || password.length < LIMITS.passwordMin || password.length > LIMITS.passwordMax) return failed(ip, "bad_request");
+    const hash = await Bun.password.hash(password, { algorithm: "argon2id" });
+    const user = accounts.resetPassword(db, resetCode, hash, ctx.now());
+    if (!user) return failed(ip, "reset_invalid");
+    hub.disconnectUser(user.id);
     const { deviceId, token } = accounts.createDevice(db, user.id, deviceName, ctx.now());
     return json(me({ user, deviceId }), 200, { "Set-Cookie": sessionCookie(req, ctx.origins, token) });
   }
@@ -132,12 +161,13 @@ export function createApi(ctx: ApiContext) {
     const body = await readJson(req);
     const now = ctx.now();
     if (body?.kind === "direct" && isId(body.user)) {
-      if (!accounts.getUser(db, body.user)) return error("not_found");
+      if (!reachable(body.user)) return error("not_found");
       const { chatId, created } = chats.findOrCreateDirect(db, s.user.id, body.user, now);
       if (created) hub.publishChat(chatId);
       return json(chats.getChat(db, chatId, s.user.id, hub.isOnline), created ? 201 : 200);
     }
     if (body?.kind === "group" && Array.isArray(body.members) && body.members.every(isId)) {
+      if (!(body.members as number[]).every(reachable)) return error("not_found");
       const title = str(body.title, LIMITS.groupTitle);
       if (!title) return error("bad_request");
       const res = chats.createGroup(db, s.user.id, title, body.members as number[], now);
@@ -191,7 +221,8 @@ export function createApi(ctx: ApiContext) {
     if (rest[0] === "members") {
       if (rest.length === 1 && req.method === "POST") {
         const user = (await readJson(req))?.user;
-        return isId(user) ? done(chats.addMember(db, chatId, s.user.id, user, ctx.now())) : error("bad_request");
+        if (!isId(user)) return error("bad_request");
+        return reachable(user) ? done(chats.addMember(db, chatId, s.user.id, user, ctx.now())) : error("not_found");
       }
       const target = Number(rest[1]);
       if (rest.length === 2 && isId(target)) {
@@ -259,6 +290,7 @@ export function createApi(ctx: ApiContext) {
     const route = parts.join("/");
     if (route === "auth/register" && req.method === "POST") return register(req, ip);
     if (route === "auth/login" && req.method === "POST") return login(req, ip);
+    if (parts[0] === "auth" && parts[1] === "reset" && parts.length <= 3 && (req.method === "GET" || req.method === "POST")) return passwordReset(req, ip, parts[2]);
 
     const s = authenticate(db, req, ctx.now());
     if (!s) return error("unauthorized");
@@ -269,6 +301,7 @@ export function createApi(ctx: ApiContext) {
       return json({ ok: true }, 200, { "Set-Cookie": clearSessionCookie(req, ctx.origins) });
     }
     if (route === "me" && req.method === "GET") return json(me(s));
+    if (parts[0] === "admin") return adminRoute(req, s, parts.slice(1));
     if (route === "me" && req.method === "PATCH") return updateMe(req, s);
     if (route === "me/avatar" && (req.method === "PUT" || req.method === "DELETE")) return myAvatar(req, s);
     if (route === "devices" && req.method === "GET") return json(accounts.listDevices(db, s.user.id, s.deviceId));
