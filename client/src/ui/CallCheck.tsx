@@ -30,13 +30,14 @@ export function CallCheck() {
       // Fresh credentials every time: they last hours, a settings page may stay open longer.
       setResult(await checkRelay(await api<TurnDto>("GET", "/turn"), transport, SECONDS, setLeft));
     } catch {
-      setResult({ ok: false, transport: null, rttMs: null, lossPct: null, error: "unreachable" });
+      setResult({ ok: false, transport: null, serverMs: null, lossPct: null, error: "unreachable" });
     } finally {
       setLeft(null);
     }
   };
 
-  const weak = result?.ok && ((result.rttMs ?? 0) > 300 || (result.lossPct ?? 0) > 3);
+  // Over 300 ms to the server and back, a call with someone as far on the other side starts to feel like a walkie-talkie.
+  const weak = result?.ok && ((result.serverMs ?? 0) > 300 || (result.lossPct ?? 0) > 3);
   return (
     <>
       <h3>{s.calls}</h3>
@@ -53,7 +54,7 @@ export function CallCheck() {
       {result && (
         <p class={result.ok ? "hint" : "error"} role="status" data-testid="call-check-result" data-ok={String(result.ok)} data-transport={result.transport ?? ""}>
           {result.ok
-            ? fmt(s.callCheckOk, { transport: (result.transport ?? "?").toUpperCase(), ms: result.rttMs ?? "?", loss: result.lossPct ?? "?" }) + (weak ? ` ${s.callCheckWeak}` : "")
+            ? fmt(s.callCheckOk, { transport: (result.transport ?? "?").toUpperCase(), ms: result.serverMs ?? "?", loss: result.lossPct ?? "?" }) + (weak ? ` ${s.callCheckWeak}` : "")
             : result.error === "no_address"
               ? s.callCheckNoAddress
               : s.callCheckFail}

@@ -13,8 +13,12 @@ export interface CallCheckResult {
   ok: boolean;
   /** How the relay was reached: udp, tcp or tls. */
   transport: string | null;
-  /** Median time for a packet to go there and back, in ms. */
-  rttMs: number | null;
+  /**
+   * Median time from this device to the relay and back, in ms. A packet of
+   * the check makes that trip twice (out to the relay and back to this same
+   * device, then the echo again), so this is half the time it took.
+   */
+  serverMs: number | null;
   /** Share of packets that did not come back, 0–100. */
   lossPct: number | null;
   /** Why it failed: no relay address of the chosen kind, or the relay could not be reached. */
@@ -31,6 +35,8 @@ export function urlsFor(urls: string[], transport: Transport): string[] {
   const kind = (u: string) => (u.startsWith("turns:") ? "tls" : u.includes("transport=tcp") ? "tcp" : "udp");
   return transport === "any" ? urls : urls.filter((u) => kind(u) === transport);
 }
+
+const half = (ms: number | null) => (ms === null ? null : Math.round(ms / 2));
 
 function median(values: number[]): number | null {
   if (values.length === 0) return null;
@@ -50,7 +56,7 @@ async function relayProtocol(pc: RTCPeerConnection): Promise<string | null> {
 
 export async function checkRelay(turn: TurnDto, transport: Transport, seconds: number, onSecond?: (left: number) => void): Promise<CallCheckResult> {
   const iceServers = turn.ice_servers.map((s) => ({ ...s, urls: urlsFor(s.urls, transport) })).filter((s) => s.urls.length > 0);
-  if (iceServers.length === 0) return { ok: false, transport: null, rttMs: null, lossPct: null, error: "no_address" };
+  if (iceServers.length === 0) return { ok: false, transport: null, serverMs: null, lossPct: null, error: "no_address" };
   const config: RTCConfiguration = { iceServers, iceTransportPolicy: "relay" };
   const a = new RTCPeerConnection(config);
   const b = new RTCPeerConnection(config);
@@ -69,7 +75,7 @@ export async function checkRelay(turn: TurnDto, transport: Transport, seconds: n
     await b.setRemoteDescription(a.localDescription!);
     await b.setLocalDescription(await b.createAnswer());
     await a.setRemoteDescription(b.localDescription!);
-    if (!(await opened)) return { ok: false, transport: null, rttMs: null, lossPct: null, error: "unreachable" };
+    if (!(await opened)) return { ok: false, transport: null, serverMs: null, lossPct: null, error: "unreachable" };
 
     const sentAt = new Map<number, number>();
     const rtts: number[] = [];
@@ -92,7 +98,7 @@ export async function checkRelay(turn: TurnDto, transport: Transport, seconds: n
     clearInterval(timer);
     await new Promise((r) => setTimeout(r, 500)); // the last echoes
     const lossPct = seq === 0 ? 100 : Math.max(0, Math.round((1 - rtts.length / seq) * 1000) / 10);
-    return { ok: rtts.length > 0, transport: await relayProtocol(a), rttMs: median(rtts), lossPct, ...(rtts.length === 0 && { error: "unreachable" as const }) };
+    return { ok: rtts.length > 0, transport: await relayProtocol(a), serverMs: half(median(rtts)), lossPct, ...(rtts.length === 0 && { error: "unreachable" as const }) };
   } finally {
     a.close();
     b.close();
