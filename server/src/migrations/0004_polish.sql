@@ -21,14 +21,14 @@ CREATE INDEX password_resets_user ON password_resets(user_id);
 -- Full-text search over message text, and the names of files sent as files.
 -- The trigram tokenizer finds any part of a word in any language ("кот"
 -- finds "котик"), ignoring case. It tells "ё" from "е", so both the index
--- and the query write "ё" as "е". Contentless: the text is read from
--- messages, the index only holds what finds it. Kept up to date by triggers,
--- so the code that writes messages does not have to remember.
+-- and the query write "ё" as "е". Kept up to date by triggers, so the code
+-- that writes messages does not have to remember.
+-- Only what SQLite 3.34 has: on macOS Bun uses the system's SQLite (3.39 on
+-- macOS 13), so no contentless_delete (3.43) and no remove_diacritics for
+-- trigram (3.45). The index keeps its own copy of the text for that.
 CREATE VIRTUAL TABLE messages_fts USING fts5(
   text,
-  content = '',
-  contentless_delete = 1,
-  tokenize = 'trigram remove_diacritics 1'
+  tokenize = 'trigram'
 );
 
 CREATE TRIGGER messages_fts_insert AFTER INSERT ON messages WHEN NEW.deleted_at IS NULL BEGIN
