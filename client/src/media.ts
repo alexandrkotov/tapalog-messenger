@@ -32,14 +32,24 @@ function toBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promi
   return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
 }
 
+/** The part of a picture to keep, in fractions of its width and height. */
+export interface Crop {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /**
- * Draws the picture at a size and encodes it as WebP, or as JPEG where the
- * browser cannot write WebP: Safari quietly hands back a PNG instead.
+ * Draws the picture (or the `crop` of it) at a size and encodes it as WebP,
+ * or as JPEG where the browser cannot write WebP: Safari quietly hands back a
+ * PNG instead.
  */
-async function encode(picture: Picture, max: number, quality: number, square = false): Promise<{ blob: Blob; width: number; height: number }> {
-  // A square is cut from the middle.
-  const side = Math.min(picture.width, picture.height);
-  const [sw, sh] = square ? [side, side] : [picture.width, picture.height];
+async function encode(picture: Picture, max: number, quality: number, crop: Crop = { x: 0, y: 0, w: 1, h: 1 }): Promise<{ blob: Blob; width: number; height: number }> {
+  const sx = crop.x * picture.width;
+  const sy = crop.y * picture.height;
+  const sw = Math.max(1, crop.w * picture.width);
+  const sh = Math.max(1, crop.h * picture.height);
   const [width, height] = fit(sw, sh, max);
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -48,7 +58,7 @@ async function encode(picture: Picture, max: number, quality: number, square = f
   // JPEG has no transparency: a PNG with see-through parts would turn black.
   g.fillStyle = "#fff";
   g.fillRect(0, 0, width, height);
-  g.drawImage(picture.source, (picture.width - sw) / 2, (picture.height - sh) / 2, sw, sh, 0, 0, width, height);
+  g.drawImage(picture.source, sx, sy, sw, sh, 0, 0, width, height);
   let blob = await toBlob(canvas, "image/webp", quality);
   if (!blob || blob.type !== "image/webp") blob = await toBlob(canvas, "image/jpeg", quality);
   if (!blob) throw new Error("The picture could not be encoded.");
@@ -82,13 +92,19 @@ const AVATAR_SIDE = 512;
 // Avatars are drawn at most 64 CSS px across.
 const AVATAR_THUMB_SIDE = 128;
 
-/** A profile or group photo: the middle square, 512 px, with a 128 px preview. Null when the picture cannot be read. */
-export async function prepareAvatar(file: Blob): Promise<Outgoing | null> {
+/**
+ * A profile or group photo: the square `crop` the person chose (the middle
+ * one by default), 512 px, with a 128 px preview. Null when the picture
+ * cannot be read.
+ */
+export async function prepareAvatar(file: Blob, crop?: Crop): Promise<Outgoing | null> {
   const picture = await openPicture(file);
   if (!picture) return null;
   try {
-    const photo = await encode(picture, AVATAR_SIDE, 0.85, true);
-    const thumb = await encode(picture, AVATAR_THUMB_SIDE, 0.8, true);
+    const side = Math.min(picture.width, picture.height);
+    crop ??= { x: (1 - side / picture.width) / 2, y: (1 - side / picture.height) / 2, w: side / picture.width, h: side / picture.height };
+    const photo = await encode(picture, AVATAR_SIDE, 0.85, crop);
+    const thumb = await encode(picture, AVATAR_THUMB_SIDE, 0.8, crop);
     const ext = photo.blob.type === "image/webp" ? "webp" : "jpg";
     return { blob: photo.blob, name: `avatar.${ext}`, width: photo.width, height: photo.height, thumb: thumb.blob };
   } catch {

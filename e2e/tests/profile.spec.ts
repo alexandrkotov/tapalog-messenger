@@ -1,25 +1,62 @@
-import { fileURLToPath } from "node:url";
 import { expect, test, type Browser, type Page, type TestInfo } from "@playwright/test";
 import { openChat, signUp, startChat } from "./people";
 import { OwnServer } from "./server";
 
-const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
-
-test("a profile photo shows up for the other person, cut square, and can be removed", async ({ browser }) => {
+test("a profile photo is cut where the person moves it, shows up for the other person, and can be removed", async ({ browser }) => {
   const alice = await signUp(browser, "Alice");
   const bob = await signUp(browser, "Bob");
   const chat = await startChat(alice, bob);
   await alice.page.goto("/");
 
+  // 2000×1000: the left half red, the right half blue.
+  const halves = await bob.page.evaluate(() => {
+    const c = document.createElement("canvas");
+    c.width = 2000;
+    c.height = 1000;
+    const g = c.getContext("2d")!;
+    g.fillStyle = "#f00";
+    g.fillRect(0, 0, 1000, 1000);
+    g.fillStyle = "#00f";
+    g.fillRect(1000, 0, 1000, 1000);
+    return c.toDataURL("image/png").split(",")[1]!;
+  });
+  const file = { name: "halves.png", mimeType: "image/png", buffer: Buffer.from(halves, "base64") };
+
   await bob.page.getByTestId("settings").click();
-  await bob.page.getByTestId("avatar-input").setInputFiles(fixture("photo.jpg"));
+  // Changing one's mind uploads nothing.
+  await bob.page.getByTestId("avatar-input").setInputFiles(file);
+  await expect(bob.page.getByTestId("avatar-crop")).toBeVisible();
+  await bob.page.keyboard.press("Escape");
+  await expect(bob.page.getByTestId("avatar-crop")).toBeHidden();
+  await expect(bob.page.getByTestId("remove-photo")).toBeHidden();
+
+  // It opens on the middle square; dragged right as far as it goes, the red half fills the circle.
+  await bob.page.getByTestId("avatar-input").setInputFiles(file);
+  await expect(bob.page.getByTestId("crop-save")).toBeEnabled();
+  const box = (await bob.page.getByTestId("crop-frame").boundingBox())!;
+  await bob.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await bob.page.mouse.down();
+  await bob.page.mouse.move(box.x + box.width, box.y + box.height / 2, { steps: 5 });
+  await bob.page.mouse.up();
+  await bob.page.getByTestId("crop-save").click();
   await expect(bob.page.getByTestId("settings-panel").getByTestId("avatar-photo")).toBeVisible();
 
   const row = alice.page.locator(`[data-testid="chat-row"][data-chat="${chat}"]`);
   const photo = row.getByTestId("avatar-photo");
   await expect(photo).toBeVisible();
-  // 3000×1500 in, the middle square out: 128 px for the small picture, 512 px behind it.
-  expect(await photo.evaluate((img: HTMLImageElement) => img.decode().then(() => [img.naturalWidth, img.naturalHeight]))).toEqual([128, 128]);
+  // A square: 128 px for the small picture, 512 px behind it. Red right up to its right edge.
+  const seen = await photo.evaluate(async (img: HTMLImageElement) => {
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const g = c.getContext("2d")!;
+    g.drawImage(img, 0, 0);
+    return { size: [img.naturalWidth, img.naturalHeight], right: [...g.getImageData(120, 64, 1, 1).data.slice(0, 3)] };
+  });
+  expect(seen.size).toEqual([128, 128]);
+  expect(seen.right[0]).toBeGreaterThan(200);
+  expect(seen.right[2]).toBeLessThan(60);
   const id = (await photo.getAttribute("src"))!.split("/")[2]!;
   const full = await alice.page.request.get(`/media/${id}`);
   expect(full.status()).toBe(200);

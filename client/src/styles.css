@@ -1070,6 +1070,68 @@ button.person:hover {
   gap: 4px;
   margin: 4px 0 12px;
 }
+
+/* Choosing the part of a picture that goes in the circle */
+.crop-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 0.6);
+}
+.crop-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+}
+.crop-frame {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #000;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.crop-frame:active {
+  cursor: grabbing;
+}
+.crop-frame img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+.crop-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 999px rgb(0 0 0 / 0.55);
+  outline: 2px solid rgb(255 255 255 / 0.8);
+  outline-offset: -2px;
+  pointer-events: none;
+}
+.crop-panel input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  max-width: 280px;
+}
+.crop-panel .hint {
+  max-width: 280px;
+  text-align: center;
+}
 .chat-card strong {
   font-size: 18px;
 }

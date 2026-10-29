@@ -1,7 +1,7 @@
 import type { ChatDto, ClientFrame, ErrorCode, MediaDto, MeDto, MemberDto, MessageDto, MessageKind, ServerFrame } from "@tapalog-messenger/shared";
 import { useEffect, useState } from "preact/hooks";
 import { api, ApiError, deviceName } from "./api";
-import { isPhotoType, prepareAvatar, preparePhoto, tooLarge, upload, type Outgoing } from "./media";
+import { isPhotoType, prepareAvatar, preparePhoto, tooLarge, upload, type Crop, type Outgoing } from "./media";
 import * as offline from "./offline";
 import * as push from "./push";
 import { navigate } from "./router";
@@ -322,10 +322,10 @@ export function setMe(me: MeDto) {
 }
 
 /** Sets my profile photo or a group's from a picture, or removes it (null). "unreadable" when the browser cannot read the picture. */
-export async function setAvatar(target: "me" | { chat: number }, file: File | null): Promise<"unreadable" | void> {
+export async function setAvatar(target: "me" | { chat: number }, file: File | null, crop?: Crop): Promise<"unreadable" | void> {
   let media: string | undefined;
   if (file) {
-    const out = await prepareAvatar(file);
+    const out = await prepareAvatar(file, crop);
     if (!out) return "unreadable";
     media = (await upload(out, () => {})).id;
   }
