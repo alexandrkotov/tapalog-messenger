@@ -153,6 +153,7 @@ test.describe("recording", () => {
     await expect(alice.page.getByTestId("recording")).toBeVisible();
     await alice.page.waitForTimeout(1500);
     await alice.page.getByTestId("record-send").click();
+    await expect(alice.page.getByTestId("voice")).toBeVisible();
     await expect(alice.page.locator('[data-testid="message"][data-pending="true"]')).toHaveCount(0);
 
     const voice = bob.page.getByTestId("voice");

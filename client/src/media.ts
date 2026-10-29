@@ -203,9 +203,14 @@ export async function startRecording(onLimit: () => void): Promise<Recording> {
     void audio.close();
   };
 
+  // Once stopping, a late cancel (the recording panel closing, say) must not
+  // take the finished recording away: browsers fire "stop" at different times.
+  let stopping = false;
+
   return {
     elapsed: () => (performance.now() - started) / 1000,
     stop() {
+      stopping = true;
       const duration = performance.now() - started;
       return new Promise((resolve) => {
         recorder.onstop = () => {
@@ -219,6 +224,8 @@ export async function startRecording(onLimit: () => void): Promise<Recording> {
       });
     },
     cancel() {
+      if (stopping) return;
+      stopping = true;
       recorder.onstop = release;
       recorder.stop();
     },

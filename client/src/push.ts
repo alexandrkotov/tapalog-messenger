@@ -16,7 +16,12 @@ function iosBrowserTab(): boolean {
   return ios && !matchMedia("(display-mode: standalone)").matches && !(navigator as { standalone?: boolean }).standalone;
 }
 
+/**
+ * This browser's subscription. Without permission there cannot be one, so
+ * the push service is not asked (in some WebKit builds asking then hangs).
+ */
 async function current(): Promise<PushSubscription | null> {
+  if (!("Notification" in window) || Notification.permission !== "granted") return null;
   const reg = await navigator.serviceWorker.getRegistration();
   return (await reg?.pushManager.getSubscription()) ?? null;
 }
@@ -24,7 +29,7 @@ async function current(): Promise<PushSubscription | null> {
 export async function pushState(): Promise<PushState> {
   if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return iosBrowserTab() ? "needs-install" : "unsupported";
   if (Notification.permission === "denied") return "denied";
-  return Notification.permission === "granted" && (await current()) ? "on" : "off";
+  return (await current()) ? "on" : "off";
 }
 
 function send(sub: PushSubscription, lang: Lang) {
