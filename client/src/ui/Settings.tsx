@@ -4,6 +4,7 @@ import { api, ApiError } from "../api";
 import { fmt, LANGS, type Lang } from "../i18n";
 import { pushState, turnOff, turnOn, type PushState } from "../push";
 import { logout, setMe, useAppState } from "../state";
+import { savedTheme, setTheme, type Theme } from "../theme";
 import { AvatarEditor } from "./AvatarEditor";
 import { errorText, Link, shortTime, useLang } from "./common";
 
@@ -17,6 +18,7 @@ export function Settings() {
   const [devices, setDevices] = useState<DeviceDto[]>([]);
   const [push, setPush] = useState<PushState | null>(null);
   const [pushBusy, setPushBusy] = useState(false);
+  const [theme, setThemeState] = useState<Theme>(savedTheme);
 
   const loadDevices = () => api<DeviceDto[]>("GET", "/devices").then(setDevices).catch(() => {});
   useEffect(() => {
@@ -82,6 +84,21 @@ export function Settings() {
               {l.name}
             </option>
           ))}
+        </select>
+
+        <h3>{s.theme}</h3>
+        <select
+          aria-label={s.theme}
+          value={theme}
+          onChange={(e) => {
+            const t = e.currentTarget.value as Theme;
+            setTheme(t);
+            setThemeState(t);
+          }}
+        >
+          <option value="system">{s.themeSystem}</option>
+          <option value="light">{s.themeLight}</option>
+          <option value="dark">{s.themeDark}</option>
         </select>
 
         {push && (

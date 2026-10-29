@@ -15,8 +15,9 @@
   --read: #1f7ae0;
   --hover: #f3f5f7;
 }
+/* Dark: by the system's setting unless light was chosen, or because dark was chosen (theme.ts). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0e1013;
     --panel: #171a1f;
     --text: #eceef2;
@@ -32,6 +33,26 @@
     --read: #5aa9ff;
     --hover: #1f242b;
   }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e1013;
+  --panel: #171a1f;
+  --text: #eceef2;
+  --muted: #9aa1ad;
+  --line: #2a2f37;
+  --accent: #3dbb93;
+  --accent-text: #08130f;
+  --mine: #164a3b;
+  --theirs: #222730;
+  --chat-bg: #0f1216;
+  --warn: #e0a24a;
+  --danger: #f0786e;
+  --read: #5aa9ff;
+  --hover: #1f242b;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 * {

@@ -99,3 +99,21 @@ test("a password reset link sets a new password, and the old one stops working",
     server.kill();
   }
 });
+
+test("a chosen dark theme outlasts a reload, over a light system setting", async ({ browser }) => {
+  const alice = await signUp(browser, "Alice");
+  await alice.page.emulateMedia({ colorScheme: "light" });
+  const background = () => alice.page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  expect(await background()).toBe("rgb(240, 242, 245)");
+
+  await alice.page.getByTestId("settings").click();
+  await alice.page.getByLabel("Theme").selectOption("dark");
+  expect(await background()).toBe("rgb(14, 16, 19)");
+  await alice.page.reload();
+  await expect(alice.page.getByRole("heading", { name: "Chats" })).toBeVisible();
+  expect(await background()).toBe("rgb(14, 16, 19)");
+
+  // Back to the system's choice.
+  await alice.page.getByLabel("Theme").selectOption("system");
+  expect(await background()).toBe("rgb(240, 242, 245)");
+});

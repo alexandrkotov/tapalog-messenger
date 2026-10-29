@@ -4,8 +4,12 @@ import { App } from "./App";
 import { pickLang, t, type Lang } from "./i18n";
 import { navigate } from "./router";
 import { setUpdateReady } from "./state";
+import { applyTheme, savedTheme } from "./theme";
 import { LangContext } from "./ui/common";
 import "./styles.css";
+
+// Before the first paint, so a chosen dark theme does not flash light.
+applyTheme(savedTheme());
 
 const LANG_KEY = "lang";
 
