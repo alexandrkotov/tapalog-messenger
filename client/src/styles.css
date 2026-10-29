@@ -259,12 +259,30 @@ small {
   margin: 8px 12px;
   width: auto;
 }
+.chat-list-scroll {
+  overflow-y: auto;
+  flex: 1;
+}
 .chat-list ul {
   list-style: none;
   margin: 0;
   padding: 0;
-  overflow-y: auto;
-  flex: 1;
+}
+.list-heading {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 12px 12px 4px;
+  background: var(--bg);
+}
+.show-more {
+  display: block;
+  margin: 8px auto 16px;
+}
+mark {
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  color: inherit;
+  border-radius: 2px;
 }
 .chat-row {
   display: flex;
@@ -556,6 +574,47 @@ button.icon-button {
   border: 0;
   background: none;
   flex: none;
+}
+button.icon-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.icon-button.on {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.chat-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.chat-search .search {
+  flex: 1;
+  min-width: 0;
+}
+.chat-search-status {
+  white-space: nowrap;
+  padding: 0 4px;
+}
+.msg-row.hit .bubble {
+  outline: 2px solid var(--accent);
+}
+.to-latest {
+  position: sticky;
+  bottom: 4px;
+  align-self: flex-end;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 18px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.2);
+  cursor: pointer;
 }
 
 /* Photos, files and voice in the feed */

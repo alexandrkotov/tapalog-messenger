@@ -20,6 +20,8 @@ export const LIMITS = {
   emoji: 16,
   /** Messages per page of history. */
   pageMax: 100,
+  /** Search hits per page; a shorter page is the last. */
+  searchPage: 50,
   /** Bytes in one uploaded file. Cloudflare's free plan passes request bodies up to 100 MB. */
   fileBytes: 50 * 1024 * 1024,
   /** Bytes in a photo preview made by the client. */

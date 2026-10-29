@@ -158,11 +158,14 @@ export function createApi(ctx: ApiContext) {
     }
     if (rest[0] === "messages" && rest.length === 1 && req.method === "GET") {
       const before = url.searchParams.get("before_seq");
+      const after = url.searchParams.get("after_seq");
       const around = url.searchParams.get("around");
       const limit = Number(url.searchParams.get("limit") ?? 50);
-      if ((before !== null && !isId(Number(before))) || (around !== null && !isId(Number(around))) || !isId(limit)) return error("bad_request");
-      if (around !== null) return json(chats.historyAround(db, chatId, Number(around), Math.min(limit, LIMITS.pageMax)));
-      return json(chats.history(db, chatId, before === null ? null : Number(before), Math.min(limit, LIMITS.pageMax)));
+      if ([before, after].some((v) => v !== null && !isId(Number(v))) || (around !== null && !isId(Number(around))) || !isId(limit)) return error("bad_request");
+      const page = Math.min(limit, LIMITS.pageMax);
+      if (around !== null) return json(chats.historyAround(db, chatId, Number(around), page));
+      if (after !== null) return json(chats.historyAfter(db, chatId, Number(after), page));
+      return json(chats.history(db, chatId, before === null ? null : Number(before), page));
     }
     if (rest[0] === "members") {
       if (rest.length === 1 && req.method === "POST") {
@@ -190,7 +193,7 @@ export function createApi(ctx: ApiContext) {
     const hits = searchMessages(db, s.user.id, q, {
       chat: chat === null ? undefined : Number(chat),
       before: before && { at: before[0]!, chat: before[1]!, seq: before[2]! },
-      limit: 50,
+      limit: LIMITS.searchPage,
     });
     return hits === "too_short" ? error("too_short") : json(hits);
   }

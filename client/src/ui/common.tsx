@@ -2,7 +2,7 @@ import { createContext, type ComponentChildren } from "preact";
 import { useContext } from "preact/hooks";
 import { fmt, t, type Lang, type Strings } from "../i18n";
 import { navigate } from "../router";
-import type { MessageKind } from "@tapalog-messenger/shared";
+import { fold, type MessageKind } from "@tapalog-messenger/shared";
 import type { Tick } from "../state";
 
 export const LangContext = createContext<{ lang: Lang; s: Strings; setLang: (l: Lang) => void }>({ lang: "en", s: t("en"), setLang: () => {} });
@@ -97,4 +97,26 @@ export function quoteText(s: Strings, m: { kind: MessageKind; body: string; medi
   if (m.kind === "text") return m.body;
   const what = m.kind === "image" ? `📷 ${s.photo}` : m.kind === "voice" ? `🎤 ${s.voiceMessage}` : `📄 ${m.media?.name ?? s.file}`;
   return m.body ? `${what}: ${m.body}` : what;
+}
+
+/** The words a search looks for, folded the way the server folds them. */
+export const searchWords = (q: string) => [...new Set(fold(q).split(/\s+/).filter(Boolean))];
+
+/** `text` with every place one of `words` occurs marked, matched the way search matches. */
+export function Highlighted({ text, words }: { text: string; words: string[] }) {
+  // Folded a character at a time, so positions in it are positions in `text`.
+  const folded = Array.from({ length: text.length }, (_, i) => {
+    const f = fold(text[i]!);
+    return f.length === 1 ? f : text[i]!;
+  }).join("");
+  const marked = new Array<boolean>(text.length).fill(false);
+  for (const w of words) for (let at = folded.indexOf(w); at >= 0; at = folded.indexOf(w, at + 1)) marked.fill(true, at, at + w.length);
+  const parts: ComponentChildren[] = [];
+  for (let i = 0; i < text.length; ) {
+    let j = i;
+    while (j < text.length && marked[j] === marked[i]) j++;
+    parts.push(marked[i] ? <mark key={i}>{text.slice(i, j)}</mark> : text.slice(i, j));
+    i = j;
+  }
+  return <>{parts}</>;
 }

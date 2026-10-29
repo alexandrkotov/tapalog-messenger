@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { MessageKind, SearchHit } from "@tapalog-messenger/shared";
+import { fold, type MessageKind, type SearchHit } from "@tapalog-messenger/shared";
 
 /**
  * Finding messages by any part of a word, in the chats the person is in.
@@ -8,9 +8,6 @@ import type { MessageKind, SearchHit } from "@tapalog-messenger/shared";
  * words, short ones included, the same way the index folds them. Newest
  * first, a page at a time.
  */
-
-/** Lower case, "ё" as "е": how both the index and the words being looked for are written. */
-export const fold = (s: string) => s.toLowerCase().replaceAll("ё", "е");
 
 /** The trigram index needs three characters to look anything up. */
 const MIN_INDEXED = 3;

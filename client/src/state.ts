@@ -48,6 +48,10 @@ export const state = {
   messages: new Map<number, MessageDto[]>(),
   /** Whether older history exists for a loaded chat. */
   older: new Map<number, boolean>(),
+  /** A chat whose loaded messages stop short of the newest, after a jump to a search hit; live messages wait until it is scrolled down. */
+  newer: new Map<number, boolean>(),
+  /** The message to scroll to and flash; `n` changes each time, so the same one can be shown again. */
+  focus: null as { chat: number; seq: number; n: number; flash: boolean } | null,
   outbox: [] as Pending[],
   /** chat → user → typing until (ms) */
   typing: new Map<number, Map<number, number>>(),
@@ -171,7 +175,8 @@ function save() {
     entries.push([`outbox:${id}`, undefined]);
     savedOutbox.delete(id);
   }
-  for (const [id, list] of state.messages) entries.push([`messages:${id}`, list.slice(-KEEP_MESSAGES)]);
+  // A piece from the middle of a chat is not worth keeping: the chat opens at its newest anyway.
+  for (const [id, list] of state.messages) entries.push([`messages:${id}`, state.newer.get(id) ? undefined : list.slice(-KEEP_MESSAGES)]);
   for (const id of savedChats) if (!state.messages.has(id)) entries.push([`messages:${id}`, undefined]);
   savedChats.clear();
   for (const id of state.messages.keys()) savedChats.add(id);
@@ -269,6 +274,8 @@ function resetState() {
   state.chats.clear();
   state.messages.clear();
   state.older.clear();
+  state.newer.clear();
+  state.focus = null;
   state.outbox = [];
   state.typing.clear();
 }
@@ -327,19 +334,80 @@ export function upsertChat(chat: ChatDto) {
 const PAGE = 50;
 
 export async function openChat(chatId: number | null) {
+  // A chat left while showing older history opens at its newest next time.
+  const left = state.openChat;
+  if (left !== null && left !== chatId && state.newer.get(left)) {
+    state.messages.delete(left);
+    state.newer.delete(left);
+  }
   state.openChat = chatId;
   changed();
   if (chatId === null) return;
-  if (!state.messages.has(chatId)) {
-    const page = await api<MessageDto[]>("GET", `/chats/${chatId}/messages?limit=${PAGE}`).catch(() => null);
-    if (!page) return;
-    // Live frames may have arrived meanwhile; keep them.
-    for (const m of page) upsertMessage(m, false);
-    if (!state.messages.has(chatId)) state.messages.set(chatId, []);
-    state.older.set(chatId, page.length === PAGE);
-    changed();
-  }
+  if (!state.messages.has(chatId) && !(await loadLatest(chatId))) return;
   markRead(chatId);
+}
+
+/** Shows one message, loading the history around it when it is not loaded yet. */
+export async function jumpTo(chatId: number, seq: number) {
+  if (!state.messages.get(chatId)?.some((m) => m.seq === seq)) {
+    const page = await api<MessageDto[]>("GET", `/chats/${chatId}/messages?around=${seq}&limit=${PAGE}`);
+    setWindow(chatId, page);
+  }
+  state.focus = { chat: chatId, seq, n: (state.focus?.n ?? 0) + 1, flash: true };
+  changed();
+}
+
+/** Goes back to the newest messages after a jump into older history. */
+export async function toLatest(chatId: number) {
+  if (!(await loadLatest(chatId))) return;
+  const last = state.messages.get(chatId)?.at(-1);
+  if (last) state.focus = { chat: chatId, seq: last.seq, n: (state.focus?.n ?? 0) + 1, flash: false };
+  changed();
+}
+
+/**
+ * Loads the newest page of a chat in place of what is loaded. The list starts
+ * empty at once, so messages arriving while the page is on its way land in it
+ * and are kept; the newer copy of each message wins.
+ */
+async function loadLatest(chatId: number): Promise<boolean> {
+  state.messages.set(chatId, []);
+  state.newer.delete(chatId);
+  changed();
+  const page = await api<MessageDto[]>("GET", `/chats/${chatId}/messages?limit=${PAGE}`).catch(() => null);
+  const live = state.messages.get(chatId);
+  if (!page) {
+    if (live?.length === 0) state.messages.delete(chatId);
+    return false;
+  }
+  const bySeq = new Map(page.map((m) => [m.seq, m]));
+  for (const m of live ?? []) if ((bySeq.get(m.seq)?.version ?? -1) <= m.version) bySeq.set(m.seq, m);
+  state.messages.set(chatId, [...bySeq.values()].sort((a, b) => a.seq - b.seq));
+  state.older.set(chatId, page.length === PAGE);
+  changed();
+  return true;
+}
+
+function setWindow(chatId: number, page: MessageDto[]) {
+  state.messages.set(chatId, page);
+  state.older.set(chatId, (page[0]?.seq ?? 1) > 1);
+  state.newer.set(chatId, (page.at(-1)?.seq ?? 0) < (state.chats.get(chatId)?.last_seq ?? 0));
+}
+
+let loadingNewer = false;
+export async function loadNewer(chatId: number) {
+  const list = state.messages.get(chatId);
+  const last = list?.at(-1)?.seq;
+  if (!list || last === undefined || loadingNewer || !state.newer.get(chatId)) return;
+  loadingNewer = true;
+  try {
+    const page = await api<MessageDto[]>("GET", `/chats/${chatId}/messages?limit=${PAGE}&after_seq=${last}`);
+    state.messages.set(chatId, [...list.filter((m) => m.seq <= last), ...page]);
+    state.newer.set(chatId, page.length === PAGE);
+    changed();
+  } finally {
+    loadingNewer = false;
+  }
 }
 
 export async function loadOlder(chatId: number) {
@@ -360,8 +428,9 @@ function upsertMessage(msg: MessageDto, onlyIfLoaded = true) {
     state.messages.set(msg.chat, [msg]);
     return;
   }
-  // An edit of a message older than what is loaded: it comes along when that page is loaded.
+  // A message outside what is loaded comes along when that page is loaded.
   if (list.length > 0 && msg.seq < list[0]!.seq) return;
+  if (state.newer.get(msg.chat) && msg.seq > (list.at(-1)?.seq ?? 0)) return;
   const i = list.findIndex((m) => m.seq === msg.seq);
   if (i >= 0) list[i] = msg;
   else {
@@ -383,6 +452,8 @@ export function sendMessage(chat: number, body: string, replyTo?: number) {
 
 function enqueue(p: Omit<Pending, "client_id" | "at">): Pending {
   const full: Pending = { ...p, client_id: crypto.randomUUID(), at: Date.now() };
+  // What is written goes at the end, so the end is what should be on screen.
+  if (state.newer.get(p.chat)) void toLatest(p.chat).catch(() => {});
   state.outbox.push(full);
   changed();
   save();
@@ -680,11 +751,13 @@ function onFrame(f: ServerFrame) {
     case "chat.removed":
       state.chats.delete(f.chat);
       state.messages.delete(f.chat);
+      state.newer.delete(f.chat);
       if (state.openChat === f.chat) navigate("/", true);
       break;
 
     case "chat.reset":
       state.messages.delete(f.chat);
+      state.newer.delete(f.chat);
       if (state.openChat === f.chat) void openChat(f.chat);
       break;
 

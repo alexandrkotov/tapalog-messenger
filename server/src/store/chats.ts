@@ -406,6 +406,12 @@ export function history(db: Database, chatId: number, beforeSeq: number | null, 
   return withReactions(db, rows.reverse());
 }
 
+/** The next page after `afterSeq`, oldest first: scrolling down from an older place in the history. */
+export function historyAfter(db: Database, chatId: number, afterSeq: number, limit: number): MessageDto[] {
+  const rows = db.query("SELECT * FROM messages WHERE chat_id = $chatId AND seq > $after ORDER BY seq LIMIT $limit").all({ chatId, after: afterSeq, limit }) as MessageRow[];
+  return withReactions(db, rows);
+}
+
 /** A page of history around one message (a search hit), oldest first: half before it, the message, the rest after. */
 export function historyAround(db: Database, chatId: number, seq: number, limit: number): MessageDto[] {
   const before = Math.floor(limit / 2);

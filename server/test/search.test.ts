@@ -174,5 +174,7 @@ describe("search over HTTP", () => {
     expect(around.data.map((m: { seq: number }) => m.seq)).toEqual([7, 8, 9, 10, 11, 12]);
     const start = await bob.call("GET", `/api/chats/${chat}/messages?around=1&limit=6`);
     expect(start.data.map((m: { seq: number }) => m.seq)).toEqual([1, 2, 3]);
+    const later = await bob.call("GET", `/api/chats/${chat}/messages?after_seq=12&limit=3`);
+    expect(later.data.map((m: { seq: number }) => m.seq)).toEqual([13, 14, 15]);
   });
 });

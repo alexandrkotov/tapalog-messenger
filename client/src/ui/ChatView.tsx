@@ -1,5 +1,6 @@
-import type { ChatDto, MediaDto, MessageDto } from "@tapalog-messenger/shared";
+import { LIMITS, type ChatDto, type MediaDto, type MessageDto, type SearchHit } from "@tapalog-messenger/shared";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { api, ApiError } from "../api";
 import { fmt } from "../i18n";
 import { formatDuration, startRecording, type Recording } from "../media";
 import {
@@ -7,6 +8,8 @@ import {
   deleteMessage,
   discard,
   editMessage,
+  jumpTo,
+  loadNewer,
   loadOlder,
   myId,
   openChat,
@@ -17,12 +20,13 @@ import {
   sendMessage,
   sendVoice,
   tickOf,
+  toLatest,
   typing,
   typingIn,
   useAppState,
   type Pending,
 } from "../state";
-import { ConnBanner } from "./ChatList";
+import { ConnBanner, SEARCH_DELAY_MS } from "./ChatList";
 import { Avatar, clockTime, errorText, lastSeenText, Link, Linkified, quoteText, Ticks, useLang } from "./common";
 import { AttachmentChip, MessageMedia, PendingMedia, PhotoViewer } from "./Media";
 
@@ -39,6 +43,9 @@ export function ChatView({ chatId }: { chatId: number }) {
   const [viewing, setViewing] = useState<string | null>(null);
   const [dropping, setDropping] = useState(false);
   const [dropped, setDropped] = useState<File[]>([]);
+  const [searching, setSearching] = useState(false);
+  /** The search hit being shown, marked until the search is closed. */
+  const [hit, setHit] = useState<number | null>(null);
 
   useEffect(() => {
     void openChat(chatId);
@@ -46,6 +53,8 @@ export function ChatView({ chatId }: { chatId: number }) {
     setSelected(null);
     setViewing(null);
     setDropped([]);
+    setSearching(false);
+    setHit(null);
     return () => void openChat(null);
   }, [chatId]);
 
@@ -112,9 +121,21 @@ export function ChatView({ chatId }: { chatId: number }) {
             </small>
           </span>
         </Link>
+        <button
+          type="button"
+          class={`icon-button${searching ? " on" : ""}`}
+          aria-label={s.searchChat}
+          title={s.searchChat}
+          aria-expanded={searching}
+          data-testid="chat-search"
+          onClick={() => (setSearching(!searching), setHit(null))}
+        >
+          🔍
+        </button>
       </header>
+      {searching && <ChatSearch chatId={chatId} onShow={setHit} onClose={() => (setSearching(false), setHit(null))} />}
       <ConnBanner inChat />
-      <MessageList chat={chat} messages={messages} pending={pending} selected={selected} onSelect={setSelected} onOpenPhoto={setViewing}>
+      <MessageList chat={chat} messages={messages} pending={pending} selected={selected} hit={hit} onSelect={setSelected} onOpenPhoto={setViewing}>
         {(m) =>
           selected === m.seq &&
           !m.deleted && (
@@ -170,11 +191,103 @@ export function ChatView({ chatId }: { chatId: number }) {
   );
 }
 
+/** Search in this chat: the newest hit first, arrows to older and newer ones, each scrolled to and marked. */
+function ChatSearch({ chatId, onShow, onClose }: { chatId: number; onShow: (seq: number | null) => void; onClose: () => void }) {
+  const { s } = useLang();
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState<SearchHit[] | null>(null);
+  const [all, setAll] = useState(false);
+  const [i, setI] = useState(0);
+  const [problem, setProblem] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => input.current?.focus(), []);
+
+  const fetchPage = (after?: SearchHit) =>
+    api<SearchHit[]>("GET", `/search?q=${encodeURIComponent(q.trim())}&chat=${chatId}${after ? `&before=${after.at}:${after.chat}:${after.seq}` : ""}`);
+
+  const show = (list: SearchHit[], k: number) => {
+    setI(k);
+    onShow(list[k]?.seq ?? null);
+    if (list[k]) void jumpTo(chatId, list[k].seq).catch(() => {});
+  };
+
+  useEffect(() => {
+    setHits(null);
+    setProblem("");
+    onShow(null);
+    if (!q.trim()) return;
+    let live = true;
+    const timer = setTimeout(() => {
+      fetchPage()
+        .then((page) => {
+          if (!live) return;
+          setHits(page);
+          setAll(page.length < LIMITS.searchPage);
+          show(page, 0);
+        })
+        .catch((e) => live && setProblem(errorText(s, e instanceof ApiError ? e.code : "generic")));
+    }, SEARCH_DELAY_MS);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [q]);
+
+  const older = async () => {
+    if (!hits) return;
+    if (i + 1 < hits.length) return show(hits, i + 1);
+    if (all) return;
+    const page = await fetchPage(hits.at(-1)).catch(() => null);
+    if (!page) return;
+    const list = [...hits, ...page];
+    setHits(list);
+    setAll(page.length < LIMITS.searchPage);
+    if (page.length) show(list, i + 1);
+  };
+  const newer = () => hits && i > 0 && show(hits, i - 1);
+
+  const status = problem || (hits === null ? "" : hits.length === 0 ? s.nothingFound : fmt(s.foundCount, { i: i + 1, n: `${hits.length}${all ? "" : "+"}` }));
+  return (
+    <div class="chat-search" role="search">
+      <input
+        ref={input}
+        class="search"
+        type="search"
+        placeholder={s.searchChat}
+        aria-label={s.searchChat}
+        value={q}
+        data-testid="chat-search-input"
+        onInput={(e) => setQ(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onClose();
+          else if (e.key === "Enter") {
+            e.preventDefault();
+            void (e.shiftKey ? newer() : older());
+          }
+        }}
+      />
+      <small class="chat-search-status" role="status" data-testid="chat-search-status">
+        {status}
+      </small>
+      <button type="button" class="icon-button" aria-label={s.prevFound} title={s.prevFound} data-testid="found-older" disabled={!hits || (all && i + 1 >= hits.length)} onClick={() => void older()}>
+        ↑
+      </button>
+      <button type="button" class="icon-button" aria-label={s.nextFound} title={s.nextFound} data-testid="found-newer" disabled={!hits || i === 0} onClick={() => void newer()}>
+        ↓
+      </button>
+      <button type="button" class="icon-button" aria-label={s.closeSearch} title={s.closeSearch} onClick={onClose}>
+        ✕
+      </button>
+    </div>
+  );
+}
+
 function MessageList({
   chat,
   messages,
   pending,
   selected,
+  hit,
   onSelect,
   onOpenPhoto,
   children,
@@ -183,6 +296,8 @@ function MessageList({
   messages: MessageDto[];
   pending: Pending[];
   selected: number | null;
+  /** A search hit to keep marked. */
+  hit: number | null;
   onSelect: (seq: number | null) => void;
   onOpenPhoto: (id: string) => void;
   children: (m: MessageDto) => unknown;
@@ -199,6 +314,22 @@ function MessageList({
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
   }, [lastKey, chat.id]);
 
+  // A message asked for (a search hit, or the newest after leaving older history): scrolled to, and flashed if found.
+  const focus = st.focus?.chat === chat.id ? st.focus : null;
+  useLayoutEffect(() => {
+    const row = focus && ref.current?.querySelector<HTMLElement>(`[data-seq="${focus.seq}"]`);
+    if (!focus || !row) return;
+    st.focus = null;
+    row.scrollIntoView({ block: focus.flash ? "center" : "end" });
+    atBottom.current = !focus.flash;
+    if (focus.flash) {
+      const color = getComputedStyle(row).getPropertyValue("--accent").trim();
+      row.querySelector(".bubble")?.animate([{ outline: `3px solid ${color}` }, { outline: "3px solid transparent" }], { duration: 2000, easing: "ease-in" });
+    }
+  }, [focus?.n, messages]);
+
+  const newer = st.newer.get(chat.id) ?? false;
+
   const byId = (id: number | null) => chat.members.find((m) => m.id === id);
   const bySeq = (seq: number) => messages.find((m) => m.seq === seq);
 
@@ -209,7 +340,10 @@ function MessageList({
       data-testid="messages"
       onScroll={(e) => {
         const el = e.currentTarget;
-        atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        const left = el.scrollHeight - el.scrollTop - el.clientHeight;
+        // Below what is loaded there is more: nothing to stay pinned to; near the end, the next page comes.
+        atBottom.current = !newer && left < 40;
+        if (newer && left < 300) void loadNewer(chat.id).catch(() => {});
       }}
     >
       {st.older.get(chat.id) && (
@@ -222,7 +356,7 @@ function MessageList({
         const reply = m.reply_to !== null ? bySeq(m.reply_to) : undefined;
         const reactions = Object.entries(m.reactions);
         return (
-          <div key={m.seq} class={`msg-row${mine ? " mine" : ""}`} data-testid="message" data-seq={m.seq}>
+          <div key={m.seq} class={`msg-row${mine ? " mine" : ""}${hit === m.seq ? " hit" : ""}`} data-testid="message" data-seq={m.seq} data-hit={hit === m.seq || undefined}>
             <div class={`bubble${m.deleted ? " deleted" : ""}${selected === m.seq ? " selected" : ""}`} onClick={() => onSelect(selected === m.seq ? null : m.seq)}>
               {chat.kind === "group" && !mine && <span class="sender">{byId(m.from)?.display_name ?? "?"}</span>}
               {reply && (
@@ -257,6 +391,16 @@ function MessageList({
           </div>
         );
       })}
+      {newer && (
+        <>
+          <button type="button" class="link load-older" onClick={() => void loadNewer(chat.id).catch(() => {})}>
+            {s.loadLater}
+          </button>
+          <button type="button" class="to-latest" aria-label={s.toLatest} title={s.toLatest} data-testid="to-latest" onClick={() => void toLatest(chat.id).catch(() => {})}>
+            ↓
+          </button>
+        </>
+      )}
       {pending.map((p) => (
         <div key={p.client_id} class="msg-row mine" data-testid="message" data-pending="true">
           <div class={`bubble${p.failed ? " failed" : ""}`} onClick={() => p.failed && retry(p.client_id)} title={p.failed ? s.notSent : undefined}>

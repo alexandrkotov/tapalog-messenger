@@ -10,4 +10,7 @@ export interface HealthResponse {
   schema: number;
 }
 
+/** Lower case, "ё" as "е": how the search index, the words looked for and the highlighting all fold text. */
+export const fold = (s: string) => s.toLowerCase().replaceAll("ё", "е");
+
 export * from "./protocol";
