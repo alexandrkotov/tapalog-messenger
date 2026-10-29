@@ -358,7 +358,8 @@ function Composer({
     if (!r) return;
     setRecording(null);
     const out = await r.stop();
-    if (out) sendVoice(chatId, out, replyTo);
+    if (out === "silent") setNotice(s.micSilent);
+    else if (out) sendVoice(chatId, out, replyTo);
     onDone();
   };
 

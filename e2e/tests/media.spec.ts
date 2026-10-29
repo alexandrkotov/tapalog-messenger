@@ -140,6 +140,22 @@ test("each browser plays the voice formats browsers record", async ({ page, brow
   }
 });
 
+test("a photo the quick decoder refuses still goes as a photo", async ({ browser }) => {
+  // Some phone browsers reject createImageBitmap for camera pictures; the app then reads it through an <img>.
+  const alice = await signUp(browser, "Alice");
+  const bob = await signUp(browser, "Bob");
+  const chat = await startChat(alice, bob);
+  await openChat(bob, chat);
+  await alice.page.evaluate(() => (window.createImageBitmap = () => Promise.reject(new DOMException("refused", "InvalidStateError"))));
+
+  await attach(alice, "photo", "photo.jpg");
+  await submit(alice);
+  await expect(bob.page.getByTestId("photo")).toBeVisible();
+  await expect(bob.page.getByTestId("photo").locator("img")).toHaveAttribute("src", /\/thumb$/);
+  const full = await bob.page.request.get(`/media/${await lastMediaId(bob.page)}`);
+  expect(["image/webp", "image/jpeg"]).toContain(full.headers()["content-type"]);
+});
+
 test.describe("recording", () => {
   test.skip(({ browserName }) => browserName === "webkit", "Playwright's WebKit has no fake microphone");
 
@@ -162,6 +178,30 @@ test.describe("recording", () => {
     await expect(bob.page.getByTestId("chat-row").first()).toContainText("Voice message");
     await voice.getByTestId("voice-play").click();
     await expect.poll(() => voice.getByTestId("voice-audio").evaluate((a: HTMLAudioElement) => a.currentTime)).toBeGreaterThan(0.2);
+  });
+
+  test("a microphone that gives only silence sends nothing and says so", async ({ browser }) => {
+    const alice = await signUp(browser, "Alice");
+    const bob = await signUp(browser, "Bob");
+    await startChat(alice, bob);
+    // A muted or wrong microphone: a live stream of zeros.
+    await alice.page.evaluate(() => {
+      navigator.mediaDevices.getUserMedia = async () => {
+        const ctx = new AudioContext();
+        const gain = ctx.createGain();
+        gain.gain.value = 0;
+        const out = ctx.createMediaStreamDestination();
+        const tone = ctx.createOscillator();
+        tone.connect(gain).connect(out);
+        tone.start();
+        return out.stream;
+      };
+    });
+    await alice.page.getByTestId("record").click();
+    await alice.page.waitForTimeout(1500);
+    await alice.page.getByTestId("record-send").click();
+    await expect(alice.page.getByText("The microphone gave no sound")).toBeVisible();
+    await expect(alice.page.getByTestId("message")).toHaveCount(0);
   });
 
   test("cancelling a recording sends nothing", async ({ browser }) => {

@@ -36,8 +36,8 @@ function toBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promi
  * Draws the picture at a size and encodes it as WebP, or as JPEG where the
  * browser cannot write WebP: Safari quietly hands back a PNG instead.
  */
-async function encode(bitmap: ImageBitmap, max: number, quality: number): Promise<{ blob: Blob; width: number; height: number }> {
-  const [width, height] = fit(bitmap.width, bitmap.height, max);
+async function encode(picture: Picture, max: number, quality: number): Promise<{ blob: Blob; width: number; height: number }> {
+  const [width, height] = fit(picture.width, picture.height, max);
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -45,7 +45,7 @@ async function encode(bitmap: ImageBitmap, max: number, quality: number): Promis
   // JPEG has no transparency: a PNG with see-through parts would turn black.
   g.fillStyle = "#fff";
   g.fillRect(0, 0, width, height);
-  g.drawImage(bitmap, 0, 0, width, height);
+  g.drawImage(picture.source, 0, 0, width, height);
   let blob = await toBlob(canvas, "image/webp", quality);
   if (!blob || blob.type !== "image/webp") blob = await toBlob(canvas, "image/jpeg", quality);
   if (!blob) throw new Error("The picture could not be encoded.");
@@ -59,21 +59,52 @@ async function encode(bitmap: ImageBitmap, max: number, quality: number): Promis
  * (HEIC outside Safari, say): it then goes as a file.
  */
 export async function preparePhoto(file: Blob, name: string): Promise<Outgoing | null> {
-  let bitmap: ImageBitmap;
+  const picture = await openPicture(file);
+  if (!picture) return null;
   try {
-    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
-  } catch {
-    return null;
-  }
-  try {
-    const thumb = await encode(bitmap, THUMB_SIDE, 0.7);
+    const thumb = await encode(picture, THUMB_SIDE, 0.7);
     // An animated GIF would lose its animation; it goes as it is.
-    if (file.type === "image/gif") return { blob: file, name, width: bitmap.width, height: bitmap.height, thumb: thumb.blob };
-    const photo = await encode(bitmap, PHOTO_SIDE, 0.8);
+    if (file.type === "image/gif") return { blob: file, name, width: picture.width, height: picture.height, thumb: thumb.blob };
+    const photo = await encode(picture, PHOTO_SIDE, 0.8);
     const ext = photo.blob.type === "image/webp" ? "webp" : "jpg";
     return { blob: photo.blob, name: name.replace(/\.[^.]*$/, "") + `.${ext}`, width: photo.width, height: photo.height, thumb: thumb.blob };
+  } catch {
+    return null;
   } finally {
-    bitmap.close();
+    picture.close();
+  }
+}
+
+interface Picture {
+  source: CanvasImageSource;
+  width: number;
+  height: number;
+  close(): void;
+}
+
+/**
+ * Decodes a picture, turned the way the camera meant. createImageBitmap is
+ * the quick way, but some phone browsers refuse its options or the file
+ * itself; an <img> reads anything the browser can show, and also applies
+ * the camera's rotation.
+ */
+async function openPicture(file: Blob): Promise<Picture | null> {
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    return { source: bitmap, width: bitmap.width, height: bitmap.height, close: () => bitmap.close() };
+  } catch {
+    // Try the <img> below.
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    if (!img.naturalWidth) throw new Error("empty");
+    return { source: img, width: img.naturalWidth, height: img.naturalHeight, close: () => URL.revokeObjectURL(url) };
+  } catch {
+    URL.revokeObjectURL(url);
+    return null;
   }
 }
 
@@ -146,6 +177,11 @@ export function recordingType(): string | null {
   return "";
 }
 
+/** Loudness (RMS, 0–1) below which a recording counts as quiet: about −34 dB, well under speech. */
+const QUIET = 0.02;
+/** Below this (−80 dB) the microphone gives no sound at all. */
+const SILENT = 0.0001;
+
 /** Squeezes loudness samples into at most `points` levels from 0 to 100, loudest at 100. */
 export function waveformOf(samples: number[], points: number = LIMITS.waveformPoints): number[] {
   if (samples.length === 0) return [];
@@ -156,7 +192,9 @@ export function waveformOf(samples: number[], points: number = LIMITS.waveformPo
     const to = Math.max(from + 1, Math.floor(((i + 1) * samples.length) / n));
     out.push(Math.max(...samples.slice(from, to)));
   }
-  const peak = Math.max(...out) || 1;
+  // Scaled to the loudest moment, but never below ordinary speech: hiss or a
+  // dead microphone then shows as the flat line it is.
+  const peak = Math.max(...out, QUIET);
   return out.map((v) => Math.round((v / peak) * 100));
 }
 
@@ -164,14 +202,38 @@ export interface Recording {
   /** Seconds so far, for the timer. */
   elapsed(): number;
   /** Stops and hands back the recording; null if it was too short to keep. */
-  stop(): Promise<Outgoing | null>;
+  stop(): Promise<Outgoing | "silent" | null>;
   cancel(): void;
 }
 
 /**
- * Starts recording from the microphone, measuring loudness ten times a
- * second for the bar under the play button. Throws if the microphone is
- * missing or not allowed.
+ * Loudness of a recording, ten levels a second (RMS, 0–1), from the sound
+ * itself: decoded at a low sample rate to keep a long message small in
+ * memory. Null if this browser cannot decode what it recorded.
+ */
+async function loudness(blob: Blob): Promise<number[] | null> {
+  try {
+    const rate = 8000;
+    const sound = await new OfflineAudioContext(1, 1, rate).decodeAudioData(await blob.arrayBuffer());
+    const data = sound.getChannelData(0);
+    const step = rate / 10;
+    const levels: number[] = [];
+    for (let at = 0; at < data.length; at += step) {
+      let sum = 0;
+      const to = Math.min(at + step, data.length);
+      for (let i = at; i < to; i++) sum += data[i]! * data[i]!;
+      levels.push(Math.sqrt(sum / (to - at)));
+    }
+    return levels;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Starts recording from the microphone. Throws if the microphone is missing
+ * or not allowed. The loudness bar is worked out from the finished recording
+ * (a live meter needs a running AudioContext, which Firefox may hold back).
  */
 export async function startRecording(onLimit: () => void): Promise<Recording> {
   const type = recordingType();
@@ -181,26 +243,13 @@ export async function startRecording(onLimit: () => void): Promise<Recording> {
   const chunks: Blob[] = [];
   recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
 
-  const audio = new AudioContext();
-  const analyser = audio.createAnalyser();
-  analyser.fftSize = 1024;
-  audio.createMediaStreamSource(stream).connect(analyser);
-  const buf = new Float32Array(analyser.fftSize);
-  const samples: number[] = [];
-  const meter = setInterval(() => {
-    analyser.getFloatTimeDomainData(buf);
-    samples.push(Math.sqrt(buf.reduce((s, v) => s + v * v, 0) / buf.length));
-  }, 100);
-
   const started = performance.now();
   const limit = setTimeout(onLimit, LIMITS.voiceMs);
   recorder.start(1000);
 
   const release = () => {
-    clearInterval(meter);
     clearTimeout(limit);
     stream.getTracks().forEach((t) => t.stop());
-    void audio.close();
   };
 
   // Once stopping, a late cancel (the recording panel closing, say) must not
@@ -213,12 +262,15 @@ export async function startRecording(onLimit: () => void): Promise<Recording> {
       stopping = true;
       const duration = performance.now() - started;
       return new Promise((resolve) => {
-        recorder.onstop = () => {
+        recorder.onstop = async () => {
           release();
           if (duration < 700 || chunks.length === 0) return resolve(null);
           const blob = new Blob(chunks, { type: (recorder.mimeType || type || "audio/webm").split(";")[0] });
+          const levels = await loudness(blob);
+          // A muted or wrong microphone records perfect silence.
+          if (levels?.length && Math.max(...levels) < SILENT) return resolve("silent");
           const ext = blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm";
-          resolve({ blob, name: `voice.${ext}`, duration_ms: duration, waveform: waveformOf(samples) });
+          resolve({ blob, name: `voice.${ext}`, duration_ms: duration, ...(levels?.length && { waveform: waveformOf(levels) }) });
         };
         recorder.stop();
       });
