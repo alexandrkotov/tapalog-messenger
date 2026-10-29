@@ -235,6 +235,110 @@ To restore:
    `messenger-data`.
 4. Start the server.
 
+### Copies off the server
+
+Backups lie on the same disk as the data, so a lost server takes them along.
+On a VPS, [restic](https://restic.net) can send each night's backup,
+encrypted on the server, to S3-compatible storage. Shown for Cloudflare R2
+(10 GB free) and the service from "On a VPS".
+
+1. **Storage.** In the Cloudflare dashboard: R2 → **Create bucket**
+   (`messenger-backups`), then **Manage API Tokens** → **Create Account API
+   token** with *Object Read & Write*, for that bucket only. Keep the Access
+   Key ID, the Secret Access Key and the S3 endpoint in a password manager.
+2. **Keys on the server**, readable by root only:
+
+   ```sh
+   sudo apt install restic
+   sudo install -d -m 700 /etc/restic && sudo install -m 600 /dev/null /etc/restic/tapalog.env && sudo nano /etc/restic/tapalog.env
+   ```
+
+   ```
+   AWS_ACCESS_KEY_ID=<Access Key ID>
+   AWS_SECRET_ACCESS_KEY=<Secret Access Key>
+   AWS_DEFAULT_REGION=auto
+   RESTIC_REPOSITORY=s3:https://<account id>.r2.cloudflarestorage.com/messenger-backups
+   RESTIC_PASSWORD_FILE=/etc/restic/tapalog.pass
+   ```
+
+3. **The password** everything is encrypted with. Put it in the password
+   manager too: without it the copies cannot be read, by anyone.
+
+   ```sh
+   sudo sh -c 'umask 077; openssl rand -base64 32 > /etc/restic/tapalog.pass' && sudo cat /etc/restic/tapalog.pass
+   sudo bash -c 'set -a; . /etc/restic/tapalog.env; restic init'
+   ```
+
+4. **Every night.** `/usr/local/sbin/tapalog-offsite-backup` (then
+   `sudo chmod 700` it) makes a fresh backup and sends it. It keeps 7 daily, 4
+   weekly and 6 monthly copies; they are grouped by tag, because every
+   backup folder has a different name:
+
+   ```sh
+   #!/bin/sh
+   set -eu
+   set -a; . /etc/restic/tapalog.env; set +a
+   out=$(runuser -u tapalog -- /usr/local/bin/tapalog-messenger backup --data /var/lib/tapalog-messenger/messenger-data)
+   echo "$out"
+   dir=$(printf '%s\n' "$out" | sed -n 's/^Backup made: \(.*\) ([0-9]* files).*/\1/p')
+   [ -d "$dir" ] || { echo "No backup folder in: $out" >&2; exit 1; }
+   restic backup --tag tapalog --host tapalog-vps "$dir"
+   restic forget --tag tapalog --group-by host,tags --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
+   ```
+
+   `/etc/systemd/system/tapalog-offsite-backup.service`:
+
+   ```
+   [Unit]
+   Description=Tapalog Messenger backup to R2
+   After=network-online.target tapalog-messenger.service
+   Wants=network-online.target
+
+   [Service]
+   Type=oneshot
+   ExecStart=/usr/local/sbin/tapalog-offsite-backup
+   CacheDirectory=restic
+   Environment=RESTIC_CACHE_DIR=/var/cache/restic
+   Nice=10
+   IOSchedulingClass=idle
+   ```
+
+   `/etc/systemd/system/tapalog-offsite-backup.timer` (a server that was off
+   at 03:30 catches up when it starts):
+
+   ```
+   [Unit]
+   Description=Nightly Tapalog Messenger backup to R2
+
+   [Timer]
+   OnCalendar=*-*-* 03:30:00
+   RandomizedDelaySec=15m
+   Persistent=true
+
+   [Install]
+   WantedBy=timers.target
+   ```
+
+   ```sh
+   sudo systemctl daemon-reload && sudo systemctl enable --now tapalog-offsite-backup.timer
+   sudo systemctl start tapalog-offsite-backup && sudo journalctl -u tapalog-offsite-backup -n 30 --no-pager
+   ```
+
+**Getting a copy back**, on any computer with restic: set the four variables
+from `tapalog.env` (`export NAME=value`, or `$env:NAME = "value"` in
+PowerShell) without `RESTIC_PASSWORD_FILE`, so restic asks for the password,
+then
+
+```sh
+restic snapshots
+restic restore latest --target ./restored
+```
+
+The backup folder is inside `restored`, under its path on the server
+(`var/lib/tapalog-messenger/messenger-backups/…`). Restore it as above, or
+run the messenger on it to look first:
+`tapalog-messenger --data <that folder> --port 9555 --no-tunnel --no-open`.
+
 ## Development
 
 Needs [Bun](https://bun.sh) 1.4.0 (the version CI and releases are built with) and Node 22 (for Playwright).
