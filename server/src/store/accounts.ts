@@ -15,6 +15,8 @@ export interface UserRow {
   is_admin: number;
   created_at: number;
   last_seen_at: number | null;
+  avatar_media_id: string | null;
+  blocked_at: number | null;
 }
 
 export interface InviteRow {
@@ -31,10 +33,11 @@ export const newSessionToken = () => randomBytes(32).toString("base64url");
 export const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 const newInviteCode = () => randomBytes(12).toString("base64url");
 
-export const toUserDto = (u: Pick<UserRow, "id" | "username" | "display_name">): UserDto => ({
+export const toUserDto = (u: Pick<UserRow, "id" | "username" | "display_name" | "avatar_media_id">): UserDto => ({
   id: u.id,
   username: u.username,
   display_name: u.display_name,
+  avatar: u.avatar_media_id,
 });
 
 export function countUsers(db: Database): number {
@@ -54,7 +57,7 @@ export function searchUsers(db: Database, q: string, excludeId: number, limit = 
   const pattern = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
   const rows = db
     .query(
-      `SELECT id, username, display_name FROM users
+      `SELECT id, username, display_name, avatar_media_id FROM users
        WHERE id != $excludeId AND (username LIKE $pattern ESCAPE '\\' OR display_name LIKE $pattern ESCAPE '\\')
        ORDER BY display_name COLLATE NOCASE LIMIT $limit`,
     )
@@ -64,6 +67,10 @@ export function searchUsers(db: Database, q: string, excludeId: number, limit = 
 
 export function updateDisplayName(db: Database, userId: number, displayName: string): void {
   db.query("UPDATE users SET display_name = $displayName WHERE id = $userId").run({ userId, displayName });
+}
+
+export function setAvatar(db: Database, userId: number, mediaId: string | null): void {
+  db.query("UPDATE users SET avatar_media_id = $mediaId WHERE id = $userId").run({ userId, mediaId });
 }
 
 export function updatePasswordHash(db: Database, userId: number, passwordHash: string): void {

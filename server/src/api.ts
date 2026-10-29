@@ -9,6 +9,7 @@ import { error, json, RateLimiter, readJson } from "./http";
 import type { Hub } from "./hub";
 import * as accounts from "./store/accounts";
 import * as chats from "./store/chats";
+import * as media from "./store/media";
 
 /** REST under /api/. Everything except register and login needs a session. */
 
@@ -114,6 +115,19 @@ export function createApi(ctx: ApiContext) {
     return json(me({ user, deviceId: s.deviceId }));
   }
 
+  /** PUT {media} sets the profile photo (an upload of one's own), DELETE removes it; everyone in a chat with this person sees the change. */
+  async function myAvatar(req: Request, s: Session): Promise<Response> {
+    let id: string | null = null;
+    if (req.method === "PUT") {
+      const wanted = (await readJson(req))?.media;
+      if (!media.fitsAvatar(db, wanted, s.user.id)) return error("bad_request");
+      id = wanted;
+    }
+    accounts.setAvatar(db, s.user.id, id);
+    for (const chat of chats.chatsOfUser(db, s.user.id, hub.isOnline)) hub.publishChat(chat.id);
+    return json(me({ user: accounts.getUser(db, s.user.id)!, deviceId: s.deviceId }));
+  }
+
   async function createChat(req: Request, s: Session): Promise<Response> {
     const body = await readJson(req);
     const now = ctx.now();
@@ -154,6 +168,13 @@ export function createApi(ctx: ApiContext) {
         }
         const title = str(body?.title, LIMITS.groupTitle);
         return title ? done(chats.renameGroup(db, chatId, s.user.id, title)) : error("bad_request");
+      }
+    }
+    if (rest[0] === "avatar" && rest.length === 1) {
+      if (req.method === "DELETE") return done(chats.setGroupAvatar(db, chatId, s.user.id, null));
+      if (req.method === "PUT") {
+        const id = (await readJson(req))?.media;
+        return media.fitsAvatar(db, id, s.user.id) ? done(chats.setGroupAvatar(db, chatId, s.user.id, id)) : error("bad_request");
       }
     }
     if (rest[0] === "messages" && rest.length === 1 && req.method === "GET") {
@@ -249,6 +270,7 @@ export function createApi(ctx: ApiContext) {
     }
     if (route === "me" && req.method === "GET") return json(me(s));
     if (route === "me" && req.method === "PATCH") return updateMe(req, s);
+    if (route === "me/avatar" && (req.method === "PUT" || req.method === "DELETE")) return myAvatar(req, s);
     if (route === "devices" && req.method === "GET") return json(accounts.listDevices(db, s.user.id, s.deviceId));
     if (parts[0] === "devices" && parts.length === 2 && req.method === "DELETE") {
       const id = Number(parts[1]);

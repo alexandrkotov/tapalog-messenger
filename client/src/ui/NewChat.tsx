@@ -70,7 +70,7 @@ export function NewChat() {
           {found?.map((u) => (
             <li key={u.id}>
               <button type="button" class="person" data-testid="person" onClick={() => (group ? toggle(u) : void startDirect(u))}>
-                <Avatar name={u.display_name} id={u.id} size={36} />
+                <Avatar name={u.display_name} id={u.id} photo={u.avatar} size={36} />
                 <span>
                   <strong>{u.display_name}</strong>
                   <small>@{u.username}</small>

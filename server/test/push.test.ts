@@ -152,7 +152,7 @@ describe("notifications", () => {
     expect(push!.headers.get("ttl")).toBe("86400");
     expect((await verifyJwt(push!.headers.get("authorization")!, vapid.publicKey)).ok).toBe(true);
     const payload = JSON.parse(decrypt(push!.body, browser)) as PushPayload;
-    expect(payload).toEqual({ chat, chat_title: null, from: alice.username.toUpperCase(), kind: "text", lang: "ru" });
+    expect(payload).toEqual({ chat, chat_title: null, from: alice.username.toUpperCase(), icon: null, kind: "text", lang: "ru" });
     expect(JSON.stringify(payload)).not.toContain("42");
   });
 

@@ -1,7 +1,7 @@
 import type { ChatDto, ClientFrame, ErrorCode, MediaDto, MeDto, MemberDto, MessageDto, MessageKind, ServerFrame } from "@tapalog-messenger/shared";
 import { useEffect, useState } from "preact/hooks";
 import { api, ApiError, deviceName } from "./api";
-import { isPhotoType, preparePhoto, tooLarge, upload, type Outgoing } from "./media";
+import { isPhotoType, prepareAvatar, preparePhoto, tooLarge, upload, type Outgoing } from "./media";
 import * as offline from "./offline";
 import * as push from "./push";
 import { navigate } from "./router";
@@ -91,6 +91,12 @@ export const myId = () => state.me?.user.id ?? 0;
 
 export function otherMembers(chat: ChatDto): MemberDto[] {
   return chat.members.filter((m) => m.id !== myId());
+}
+
+/** The photo standing for a chat: the group's own, or the other person's (mine in the chat with myself). */
+export function chatPhoto(chat: ChatDto): string | null {
+  if (chat.kind === "group") return chat.avatar;
+  return otherMembers(chat)[0]?.avatar ?? state.me?.user.avatar ?? null;
 }
 
 export function chatName(chat: ChatDto): string {
@@ -307,6 +313,20 @@ export function setUpdateReady() {
 export function setMe(me: MeDto) {
   state.me = me;
   changed();
+}
+
+/** Sets my profile photo or a group's from a picture, or removes it (null). "unreadable" when the browser cannot read the picture. */
+export async function setAvatar(target: "me" | { chat: number }, file: File | null): Promise<"unreadable" | void> {
+  let media: string | undefined;
+  if (file) {
+    const out = await prepareAvatar(file);
+    if (!out) return "unreadable";
+    media = (await upload(out, () => {})).id;
+  }
+  const path = target === "me" ? "/me/avatar" : `/chats/${target.chat}/avatar`;
+  const res = await api<MeDto | ChatDto>(file ? "PUT" : "DELETE", path, file ? { media } : undefined);
+  if ("user" in res) setMe(res);
+  else upsertChat(res);
 }
 
 // ---- Chats and history -----------------------------------------------------

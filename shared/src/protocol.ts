@@ -48,6 +48,8 @@ export interface UserDto {
   id: number;
   username: string;
   display_name: string;
+  /** Media id of the profile photo (512 px, with a 128 px thumb); any signed-in user may load it. */
+  avatar: string | null;
 }
 
 export interface MemberDto extends UserDto {
@@ -110,6 +112,8 @@ export interface ChatDto {
   kind: "direct" | "group";
   /** Group title; null for a direct chat (the client shows the other person). */
   title: string | null;
+  /** Group photo, like UserDto.avatar; null for a direct chat. */
+  avatar: string | null;
   members: MemberDto[];
   last_seq: number;
   /** Grows with every change in the chat: new message, edit, delete, reaction. */
@@ -178,6 +182,8 @@ export interface PushPayload {
   /** Group title; null for a direct chat, where the sender's name is the title. */
   chat_title: string | null;
   from: string;
+  /** The sender's (or group's) photo as a URL for the notification's icon. */
+  icon: string | null;
   kind: MessageKind;
   lang: string;
 }

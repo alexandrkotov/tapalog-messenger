@@ -36,8 +36,11 @@ function toBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promi
  * Draws the picture at a size and encodes it as WebP, or as JPEG where the
  * browser cannot write WebP: Safari quietly hands back a PNG instead.
  */
-async function encode(picture: Picture, max: number, quality: number): Promise<{ blob: Blob; width: number; height: number }> {
-  const [width, height] = fit(picture.width, picture.height, max);
+async function encode(picture: Picture, max: number, quality: number, square = false): Promise<{ blob: Blob; width: number; height: number }> {
+  // A square is cut from the middle.
+  const side = Math.min(picture.width, picture.height);
+  const [sw, sh] = square ? [side, side] : [picture.width, picture.height];
+  const [width, height] = fit(sw, sh, max);
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -45,7 +48,7 @@ async function encode(picture: Picture, max: number, quality: number): Promise<{
   // JPEG has no transparency: a PNG with see-through parts would turn black.
   g.fillStyle = "#fff";
   g.fillRect(0, 0, width, height);
-  g.drawImage(picture.source, 0, 0, width, height);
+  g.drawImage(picture.source, (picture.width - sw) / 2, (picture.height - sh) / 2, sw, sh, 0, 0, width, height);
   let blob = await toBlob(canvas, "image/webp", quality);
   if (!blob || blob.type !== "image/webp") blob = await toBlob(canvas, "image/jpeg", quality);
   if (!blob) throw new Error("The picture could not be encoded.");
@@ -68,6 +71,26 @@ export async function preparePhoto(file: Blob, name: string): Promise<Outgoing |
     const photo = await encode(picture, PHOTO_SIDE, 0.8);
     const ext = photo.blob.type === "image/webp" ? "webp" : "jpg";
     return { blob: photo.blob, name: name.replace(/\.[^.]*$/, "") + `.${ext}`, width: photo.width, height: photo.height, thumb: thumb.blob };
+  } catch {
+    return null;
+  } finally {
+    picture.close();
+  }
+}
+
+const AVATAR_SIDE = 512;
+// Avatars are drawn at most 64 CSS px across.
+const AVATAR_THUMB_SIDE = 128;
+
+/** A profile or group photo: the middle square, 512 px, with a 128 px preview. Null when the picture cannot be read. */
+export async function prepareAvatar(file: Blob): Promise<Outgoing | null> {
+  const picture = await openPicture(file);
+  if (!picture) return null;
+  try {
+    const photo = await encode(picture, AVATAR_SIDE, 0.85, true);
+    const thumb = await encode(picture, AVATAR_THUMB_SIDE, 0.8, true);
+    const ext = photo.blob.type === "image/webp" ? "webp" : "jpg";
+    return { blob: photo.blob, name: `avatar.${ext}`, width: photo.width, height: photo.height, thumb: thumb.blob };
   } catch {
     return null;
   } finally {

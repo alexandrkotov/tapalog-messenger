@@ -122,6 +122,9 @@ const en = {
 
   settings: "Settings",
   profile: "Profile",
+  changePhoto: "Change photo",
+  removePhoto: "Remove photo",
+  photoUnreadable: "This picture could not be read. Try a JPEG or PNG.",
   changePassword: "Change password",
   currentPassword: "Current password",
   newPassword: "New password",
@@ -264,6 +267,9 @@ const ru: Strings = {
 
   settings: "Настройки",
   profile: "Профиль",
+  changePhoto: "Сменить фото",
+  removePhoto: "Убрать фото",
+  photoUnreadable: "Не удалось прочитать картинку. Попробуйте JPEG или PNG.",
   changePassword: "Сменить пароль",
   currentPassword: "Текущий пароль",
   newPassword: "Новый пароль",
@@ -404,6 +410,9 @@ const uk: Strings = {
 
   settings: "Налаштування",
   profile: "Профіль",
+  changePhoto: "Змінити фото",
+  removePhoto: "Прибрати фото",
+  photoUnreadable: "Не вдалося прочитати зображення. Спробуйте JPEG або PNG.",
   changePassword: "Змінити пароль",
   currentPassword: "Поточний пароль",
   newPassword: "Новий пароль",

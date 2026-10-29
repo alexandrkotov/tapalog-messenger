@@ -3,7 +3,8 @@ import { useState } from "preact/hooks";
 import { api } from "../api";
 import { fmt } from "../i18n";
 import { navigate } from "../router";
-import { chatName, myId, upsertChat, useAppState } from "../state";
+import { chatName, chatPhoto, myId, upsertChat, useAppState } from "../state";
+import { AvatarEditor } from "./AvatarEditor";
 import { Avatar, lastSeenText, Link, useLang } from "./common";
 import { useUserSearch } from "./NewChat";
 
@@ -37,7 +38,11 @@ export function ChatInfo({ chatId }: { chatId: number }) {
           </form>
         )}
         <div class="chat-card">
-          <Avatar name={chatName(chat)} id={chat.kind === "direct" ? (chat.members.find((m) => m.id !== myId())?.id ?? chat.id) : chat.id} size={64} />
+          {isAdmin ? (
+            <AvatarEditor name={chatName(chat)} id={chat.id} photo={chat.avatar} target={{ chat: chatId }} size={64} />
+          ) : (
+            <Avatar name={chatName(chat)} id={chat.kind === "direct" ? (chat.members.find((m) => m.id !== myId())?.id ?? chat.id) : chat.id} photo={chatPhoto(chat)} size={64} />
+          )}
           <strong>{chatName(chat)}</strong>
         </div>
 
@@ -50,7 +55,7 @@ export function ChatInfo({ chatId }: { chatId: number }) {
         <ul class="people">
           {chat.members.map((m) => (
             <li key={m.id} class="person" data-testid="member">
-              <Avatar name={m.display_name} id={m.id} online={m.online} size={36} />
+              <Avatar name={m.display_name} id={m.id} photo={m.avatar} online={m.online} size={36} />
               <span>
                 <strong>
                   {m.display_name}
@@ -86,7 +91,7 @@ export function ChatInfo({ chatId }: { chatId: number }) {
                 .map((u) => (
                   <li key={u.id}>
                     <button type="button" class="person" onClick={() => (void apply("POST", "/members", { user: u.id }), setQ(""))}>
-                      <Avatar name={u.display_name} id={u.id} size={36} />
+                      <Avatar name={u.display_name} id={u.id} photo={u.avatar} size={36} />
                       <span>
                         <strong>{u.display_name}</strong>
                         <small>@{u.username}</small>

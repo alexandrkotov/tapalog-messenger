@@ -32,11 +32,13 @@ export function lastSeenText(s: Strings, ms: number | null, lang: Lang): string 
 
 const HUES = [160, 200, 260, 330, 20, 40, 100];
 
-export function Avatar({ name, id, online, size = 40 }: { name: string; id: number; online?: boolean; size?: number }) {
+/** A round photo, or the first letter on a colour picked by id when there is none (or it cannot load, offline say). */
+export function Avatar({ name, id, photo, online, size = 40 }: { name: string; id: number; photo?: string | null; online?: boolean; size?: number }) {
   const letter = [...name.trim()][0]?.toUpperCase() ?? "?";
   return (
     <span class="avatar" style={{ width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.42)}px`, background: `hsl(${HUES[id % HUES.length]} 45% 45%)` }} aria-hidden="true">
       {letter}
+      {photo && <img src={`/media/${photo}/thumb`} alt="" data-testid="avatar-photo" onError={(e) => (e.currentTarget.hidden = true)} />}
       {online && <span class="avatar-online" />}
     </span>
   );

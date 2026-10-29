@@ -158,3 +158,60 @@ describe("helpers", () => {
     expect(budget.left(1, 3600 * 1000 + 1)).toBe(100);
   });
 });
+
+describe("profile and group photos", () => {
+  it("anyone signed in sees a profile photo; it can be removed", async () => {
+    const alice = await newUser("alice");
+    const bob = await newUser("bob");
+    const stranger = await newUser("carol");
+    const chat = await directChat(alice, bob);
+    const ws = await bob.connect();
+    const photo = (await upload(alice, "face", "image/webp", "name=me.webp&width=512&height=512")).data;
+    expect((await raw(alice, "PUT", `/api/media/${photo.id}/thumb`, "small face", { "Content-Type": "image/webp" })).status).toBe(200);
+
+    const set = await alice.call("PUT", "/api/me/avatar", { media: photo.id });
+    expect(set.data.user.avatar).toBe(photo.id);
+    // Whoever has a chat with Alice hears of it; the photo itself is open to every signed-in user.
+    const update = await ws.next("chat.update");
+    expect(update.chat.id).toBe(chat);
+    expect(update.chat.members.find((m: { id: number }) => m.id === alice.id)?.avatar).toBe(photo.id);
+    expect((await raw(stranger, "GET", `/media/${photo.id}/thumb`)).status).toBe(200);
+    expect((await raw(null, "GET", `/media/${photo.id}`)).status).toBe(401);
+    // In use, it no longer changes.
+    expect((await raw(alice, "PUT", `/api/media/${photo.id}/thumb`, "other", { "Content-Type": "image/webp" })).status).toBe(403);
+
+    expect((await alice.call("DELETE", "/api/me/avatar")).data.user.avatar).toBeNull();
+    expect((await raw(stranger, "GET", `/media/${photo.id}`)).status).toBe(404);
+    ws.close();
+  });
+
+  it("must be a picture of one's own that nothing else uses", async () => {
+    const alice = await newUser("alice");
+    const bob = await newUser("bob");
+    const chat = await directChat(alice, bob);
+    const bobs = (await upload(bob, "bob's face")).data;
+    const pdf = (await upload(alice, "%PDF", "application/pdf", "name=a.pdf")).data;
+    const sent = (await upload(alice, "sent photo")).data;
+    await sendWith(alice, chat, "image", sent.id);
+    for (const media of [bobs.id, pdf.id, sent.id, "AAAAAAAAAAAAAAAAAAAAAA", 42, undefined]) {
+      expect((await alice.call("PUT", "/api/me/avatar", { media })).status).toBe(400);
+    }
+  });
+
+  it("only a group's admin changes the group photo", async () => {
+    const alice = await newUser("alice");
+    const bob = await newUser("bob");
+    const group = (await alice.call("POST", "/api/chats", { kind: "group", title: "Family", members: [bob.id] })).data.id;
+    const direct = await directChat(alice, bob);
+    const photo = (await upload(alice, "family")).data;
+    const bobs = (await upload(bob, "bob's family")).data;
+
+    expect((await bob.call("PUT", `/api/chats/${group}/avatar`, { media: bobs.id })).status).toBe(403);
+    expect((await alice.call("PUT", `/api/chats/${direct}/avatar`, { media: photo.id })).status).toBe(404);
+    const set = await alice.call("PUT", `/api/chats/${group}/avatar`, { media: photo.id });
+    expect(set.data.avatar).toBe(photo.id);
+    expect((await bob.call("GET", `/api/chats/${group}`)).data.avatar).toBe(photo.id);
+    expect((await bob.call("DELETE", `/api/chats/${group}/avatar`)).status).toBe(403);
+    expect((await alice.call("DELETE", `/api/chats/${group}/avatar`)).data.avatar).toBeNull();
+  });
+});

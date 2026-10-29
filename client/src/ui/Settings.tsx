@@ -4,6 +4,7 @@ import { api, ApiError } from "../api";
 import { fmt, LANGS, type Lang } from "../i18n";
 import { pushState, turnOff, turnOn, type PushState } from "../push";
 import { logout, setMe, useAppState } from "../state";
+import { AvatarEditor } from "./AvatarEditor";
 import { errorText, Link, shortTime, useLang } from "./common";
 
 export function Settings() {
@@ -65,6 +66,7 @@ export function Settings() {
       </header>
       <div class="panel-body">
         <h3>{s.profile}</h3>
+        <AvatarEditor name={me.user.display_name} id={me.user.id} photo={me.user.avatar} target="me" />
         <form class="row" onSubmit={(e) => (e.preventDefault(), void save({ display_name: name.trim() }))}>
           <input aria-label={s.displayName} value={name} maxLength={64} onInput={(e) => setName(e.currentTarget.value)} />
           <button disabled={!name.trim() || name.trim() === me.user.display_name}>{s.save}</button>

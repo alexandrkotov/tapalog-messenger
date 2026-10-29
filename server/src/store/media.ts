@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { MediaDto } from "@tapalog-messenger/shared";
+import { MEDIA_ID_RE, type MediaDto } from "@tapalog-messenger/shared";
 
 /**
  * Uploaded files. The bytes are stored once per content under
@@ -33,6 +33,7 @@ export const UNUSED_KEEP_MS = 24 * 3600 * 1000;
 /** Files on disk younger than this are never collected: their row may be about to be written. */
 const FRESH_FILE_MS = 3600 * 1000;
 const TMP = "tmp";
+const AVATAR_TYPES = ["image/webp", "image/jpeg", "image/png"];
 
 export const newMediaId = () => randomBytes(16).toString("base64url");
 
@@ -113,14 +114,18 @@ export function setThumb(db: Database, id: string, sha256: string, mime: string)
   db.query("UPDATE media SET thumb_sha256 = $sha256, thumb_mime = $mime WHERE id = $id").run({ id, sha256, mime });
 }
 
-/** Whether a message that uses this file already exists: then it no longer changes. */
+/** Uploads in use as a profile or group photo. */
+const AVATARS = "SELECT avatar_media_id FROM users WHERE avatar_media_id IS NOT NULL UNION ALL SELECT avatar_media_id FROM chats WHERE avatar_media_id IS NOT NULL";
+
+/** Whether a message or a profile uses this file already: then it no longer changes. */
 export function isAttached(db: Database, id: string): boolean {
-  return db.query("SELECT 1 FROM messages WHERE media_id = $id LIMIT 1").get({ id }) !== null;
+  return db.query(`SELECT 1 FROM messages WHERE media_id = $id UNION ALL SELECT 1 FROM (${AVATARS}) WHERE avatar_media_id = $id LIMIT 1`).get({ id }) !== null;
 }
 
 /**
- * Who may download a file: whoever uploaded it, and the members of every chat
- * where a message that is not deleted carries it.
+ * Who may download a file: whoever uploaded it, the members of every chat
+ * where a message that is not deleted carries it, and, for a profile or
+ * group photo, everyone signed in.
  */
 export function canRead(db: Database, id: string, userId: number): boolean {
   return (
@@ -130,10 +135,19 @@ export function canRead(db: Database, id: string, userId: number): boolean {
          UNION ALL
          SELECT 1 FROM messages m JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = $userId
          WHERE m.media_id = $id AND m.deleted_at IS NULL
+         UNION ALL
+         SELECT 1 FROM (${AVATARS}) WHERE avatar_media_id = $id
          LIMIT 1`,
       )
       .get({ id, userId }) !== null
   );
+}
+
+/** Whether `userId` may make this upload a profile or group photo: their own picture, not used anywhere yet. */
+export function fitsAvatar(db: Database, id: unknown, userId: number): id is string {
+  if (typeof id !== "string" || !MEDIA_ID_RE.test(id)) return false;
+  const row = getMedia(db, id);
+  return !!row && row.owner_id === userId && AVATAR_TYPES.includes(row.mime) && !isAttached(db, id);
 }
 
 export function mediaDto(row: MediaRow): MediaDto {
@@ -151,12 +165,15 @@ export function mediaDto(row: MediaRow): MediaDto {
 }
 
 /**
- * Deletes uploads no message uses (once they are a day old) and then every
+ * Deletes uploads no message or profile uses (once they are a day old; a replaced photo goes the same way) and then every
  * file on disk that no upload points at any more. Run at start and hourly.
  */
 export function collectGarbage(db: Database, mediaDir: string, now: number): { rows: number; files: number } {
   const rows = db
-    .query("DELETE FROM media WHERE created_at < $cutoff AND id NOT IN (SELECT media_id FROM messages WHERE media_id IS NOT NULL)")
+    .query(
+      `DELETE FROM media WHERE created_at < $cutoff
+       AND id NOT IN (SELECT media_id FROM messages WHERE media_id IS NOT NULL) AND id NOT IN (${AVATARS})`,
+    )
     .run({ cutoff: now - UNUSED_KEEP_MS }).changes;
   const used = new Set(
     (db.query("SELECT sha256 AS h FROM media UNION SELECT thumb_sha256 FROM media WHERE thumb_sha256 IS NOT NULL").all() as { h: string }[]).map((r) => r.h),

@@ -2,7 +2,7 @@ import { LIMITS, type SearchHit } from "@tapalog-messenger/shared";
 import { useEffect, useState } from "preact/hooks";
 import { api, ApiError } from "../api";
 import { match, navigate, usePath } from "../router";
-import { chatActivity, chatName, jumpTo, myId, otherMembers, tickOf, typingIn, useAppState } from "../state";
+import { chatActivity, chatName, chatPhoto, jumpTo, myId, otherMembers, tickOf, typingIn, useAppState } from "../state";
 import { Avatar, errorText, Highlighted, Link, quoteText, searchWords, shortTime, Ticks, useLang } from "./common";
 
 export function ChatList() {
@@ -51,7 +51,7 @@ export function ChatList() {
           return (
             <li key={chat.id}>
               <Link href={`/chat/${chat.id}`} class={`chat-row${current === chat.id ? " active" : ""}`} data-testid="chat-row" data-chat={chat.id}>
-                <Avatar name={name} id={other?.id ?? chat.id} online={other?.online} />
+                <Avatar name={name} id={other?.id ?? chat.id} photo={chatPhoto(chat)} online={other?.online} />
                 <span class="chat-row-main">
                   <span class="chat-row-top">
                     <span class="chat-row-name">{name}</span>
@@ -153,7 +153,7 @@ function FoundMessages({ q }: { q: string }) {
                     .catch(() => {});
                 }}
               >
-                <Avatar name={name} id={other?.id ?? chat.id} />
+                <Avatar name={name} id={other?.id ?? chat.id} photo={chatPhoto(chat)} />
                 <span class="chat-row-main">
                   <span class="chat-row-top">
                     <span class="chat-row-name">{name}</span>

@@ -153,7 +153,7 @@ describe("chats over HTTP", () => {
     const alice = await newUser("alice");
     const zed = await newUser("zedonly");
     const found = (await alice.call("GET", "/api/users?q=zedon")).data;
-    expect(found).toEqual([{ id: zed.id, username: zed.username, display_name: zed.username.toUpperCase() }]);
+    expect(found).toEqual([{ id: zed.id, username: zed.username, display_name: zed.username.toUpperCase(), avatar: null }]);
   });
 });
 

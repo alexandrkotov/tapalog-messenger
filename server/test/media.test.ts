@@ -121,6 +121,24 @@ describe("collecting garbage", () => {
     expect(existsSync(blobPath(dir, used.sha256))).toBe(true);
   });
 
+  it("keeps profile and group photos in use, and drops one replaced", async () => {
+    const alice = user("alice");
+    const group = chats.createGroup(db, alice, "Family", [], tick()) as number;
+    const first = await upload(alice, "first face");
+    const second = await upload(alice, "second face");
+    const family = await upload(alice, "family");
+    accounts.setAvatar(db, alice, first.id);
+    chats.setGroupAvatar(db, group, alice, family.id);
+    accounts.setAvatar(db, alice, second.id);
+    for (const m of [first, second, family]) old(blobPath(dir, m.sha256));
+
+    now += UNUSED_KEEP_MS + 1;
+    expect(collectGarbage(db, dir, now)).toEqual({ rows: 1, files: 1 });
+    expect(existsSync(blobPath(dir, first.sha256))).toBe(false);
+    expect(existsSync(blobPath(dir, second.sha256))).toBe(true);
+    expect(existsSync(blobPath(dir, family.sha256))).toBe(true);
+  });
+
   it("frees a deleted message's file unless another upload has the same bytes", async () => {
     const [alice, bob] = [user("alice"), user("bob")];
     const { chatId } = chats.findOrCreateDirect(db, alice, bob, tick());

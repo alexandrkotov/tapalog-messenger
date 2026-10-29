@@ -30,6 +30,7 @@ interface ChatRow {
   id: number;
   kind: "direct" | "group";
   title: string | null;
+  avatar_media_id: string | null;
   last_seq: number;
   version: number;
 }
@@ -112,7 +113,7 @@ export function contactIds(db: Database, userId: number): number[] {
 function chatDto(db: Database, chat: ChatRow, forUserId: number, isOnline: IsOnline): ChatDto {
   const members = db
     .query(
-      `SELECT u.id, u.username, u.display_name, u.last_seen_at, m.role, m.delivered_seq, m.read_seq
+      `SELECT u.id, u.username, u.display_name, u.avatar_media_id AS avatar, u.last_seen_at, m.role, m.delivered_seq, m.read_seq
        FROM chat_members m JOIN users u ON u.id = m.user_id WHERE m.chat_id = $chatId ORDER BY m.role = 'admin' DESC, m.joined_at, u.id`,
     )
     .all({ chatId: chat.id }) as (Omit<MemberDto, "online">)[];
@@ -137,6 +138,7 @@ function chatDto(db: Database, chat: ChatRow, forUserId: number, isOnline: IsOnl
     id: chat.id,
     kind: chat.kind,
     title: chat.title,
+    avatar: chat.avatar_media_id,
     members: members.map((m) => ({ ...m, online: isOnline(m.id) })),
     last_seq: chat.last_seq,
     version: chat.version,
@@ -149,7 +151,7 @@ function chatDto(db: Database, chat: ChatRow, forUserId: number, isOnline: IsOnl
 /** The chat as `forUserId` sees it, or null if they are not in it. */
 export function getChat(db: Database, chatId: number, forUserId: number, isOnline: IsOnline): ChatDto | null {
   if (!memberRole(db, chatId, forUserId)) return null;
-  const chat = db.query("SELECT id, kind, title, last_seq, version FROM chats WHERE id = $chatId").get({ chatId }) as ChatRow | null;
+  const chat = db.query("SELECT id, kind, title, avatar_media_id, last_seq, version FROM chats WHERE id = $chatId").get({ chatId }) as ChatRow | null;
   return chat ? chatDto(db, chat, forUserId, isOnline) : null;
 }
 
@@ -157,7 +159,7 @@ export function getChat(db: Database, chatId: number, forUserId: number, isOnlin
 export function chatsOfUser(db: Database, userId: number, isOnline: IsOnline): ChatDto[] {
   const chats = db
     .query(
-      `SELECT c.id, c.kind, c.title, c.last_seq, c.version FROM chats c JOIN chat_members m ON m.chat_id = c.id
+      `SELECT c.id, c.kind, c.title, c.avatar_media_id, c.last_seq, c.version FROM chats c JOIN chat_members m ON m.chat_id = c.id
        WHERE m.user_id = $userId
        ORDER BY coalesce((SELECT max(created_at) FROM messages WHERE chat_id = c.id), c.created_at) DESC, c.id DESC`,
     )
@@ -275,6 +277,13 @@ export function renameGroup(db: Database, chatId: number, actor: number, title: 
   if (!isGroup(db, chatId)) return "not_found";
   if (memberRole(db, chatId, actor) !== "admin") return "forbidden";
   db.query("UPDATE chats SET title = $title WHERE id = $chatId").run({ chatId, title });
+  return true;
+}
+
+export function setGroupAvatar(db: Database, chatId: number, actor: number, mediaId: string | null): true | Refusal {
+  if (!isGroup(db, chatId)) return "not_found";
+  if (memberRole(db, chatId, actor) !== "admin") return "forbidden";
+  db.query("UPDATE chats SET avatar_media_id = $mediaId WHERE id = $chatId").run({ chatId, mediaId });
   return true;
 }
 

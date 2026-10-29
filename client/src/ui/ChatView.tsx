@@ -5,6 +5,7 @@ import { fmt } from "../i18n";
 import { formatDuration, startRecording, type Recording } from "../media";
 import {
   chatName,
+  chatPhoto,
   deleteMessage,
   discard,
   editMessage,
@@ -105,7 +106,7 @@ export function ChatView({ chatId }: { chatId: number }) {
           ←
         </Link>
         <Link href={`/chat/${chatId}/info`} class="chat-title" data-testid="chat-title">
-          <Avatar name={name} id={other?.id ?? chat.id} online={other?.online} size={36} />
+          <Avatar name={name} id={other?.id ?? chat.id} photo={chatPhoto(chat)} online={other?.online} size={36} />
           <span>
             <strong>
               {name}

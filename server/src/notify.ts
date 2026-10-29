@@ -38,11 +38,19 @@ export function createNotifier(o: NotifierOptions) {
       if (msg.from === null) return;
       const subs = subscriptions.subscriptionsOf(db, chats.membersToNotify(db, msg.chat, msg.from, o.now())).filter((s) => !o.isDeviceOnline(s.user_id, s.device_id));
       if (subs.length === 0) return;
-      const chat = db.query("SELECT kind, title FROM chats WHERE id = $id").get({ id: msg.chat }) as { kind: string; title: string | null } | null;
-      const from = getUser(db, msg.from)?.display_name ?? "";
+      const chat = db.query("SELECT kind, title, avatar_media_id FROM chats WHERE id = $id").get({ id: msg.chat }) as {
+        kind: string;
+        title: string | null;
+        avatar_media_id: string | null;
+      } | null;
+      const sender = getUser(db, msg.from);
+      const from = sender?.display_name ?? "";
+      // A group's own photo if it has one, else the sender's.
+      const photo = chat?.avatar_media_id ?? sender?.avatar_media_id ?? null;
+      const icon = photo && `/media/${photo}/thumb`;
       await Promise.all(
         subs.map(async (sub) => {
-          const payload: PushPayload = { chat: msg.chat, chat_title: chat?.kind === "group" ? chat.title : null, from, kind: msg.kind, lang: sub.lang };
+          const payload: PushPayload = { chat: msg.chat, chat_title: chat?.kind === "group" ? chat.title : null, from, icon, kind: msg.kind, lang: sub.lang };
           const result = await sendPush(sub, payload, { vapid: o.vapid, subject: o.subject(), now: o.now(), fetch: o.fetch });
           if (result === "gone") subscriptions.forgetSubscription(db, sub.endpoint);
         }),

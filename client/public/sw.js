@@ -82,7 +82,7 @@ self.addEventListener("push", (event) => {
       body: p.chat_title ? `${p.from}: ${what}` : what,
       tag: `chat-${p.chat}`,
       renotify: true,
-      icon: "/icons/icon-192.png",
+      icon: p.icon || "/icons/icon-192.png",
       data: { chat: p.chat },
     }),
   );
