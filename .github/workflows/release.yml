@@ -1,0 +1,187 @@
+name: Release
+
+# A tag like v0.3.0 builds every download and publishes a GitHub Release:
+#   git tag v0.3.0 && git push --tags
+# The version in the tag goes into the binaries (--version, /healthz, the
+# status page), whatever package.json says.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build the downloads
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - name: Version from the tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' || { echo "::error::$GITHUB_REF_NAME is not vX.Y.Z"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          node -e 'const fs=require("fs"),f="server/package.json",p=JSON.parse(fs.readFileSync(f));p.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(p,null,2)+"\n")' "$VERSION"
+      - run: bun install --frozen-lockfile
+      - run: bun run build:client
+      - uses: actions/cache@v6
+        with:
+          path: vendor
+          key: cloudflared-all-${{ hashFiles('scripts/cloudflared.lock.json') }}
+      - run: |
+          for target in linux-x64 linux-arm64 macos-arm64 macos-x64 windows-x64; do
+            bun run compile:$target
+          done
+
+      # A Release asset carries no file permissions; a zip does, and macOS
+      # restores them on unzip, so the program stays runnable.
+      - name: Zip the macOS binaries
+        working-directory: dist
+        run: |
+          for arch in arm64 x64; do
+            chmod +x "tapalog-messenger-macos-$arch"
+            zip -j "tapalog-messenger-macos-$arch.zip" "tapalog-messenger-macos-$arch"
+            rm "tapalog-messenger-macos-$arch"
+          done
+
+      # The same Linux binaries as a package with a menu entry. No service is
+      # installed: it is started from the menu and stopped from its status
+      # page, like every other download. The data goes to ~/.tapalog-messenger.
+      - name: Build the .deb packages
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -e
+          for pair in x64:amd64 arm64:arm64; do
+            arch="${pair%%:*}"
+            debarch="${pair##*:}"
+            root="pkg-$debarch"
+            mkdir -p "$root/DEBIAN" "$root/usr/bin" "$root/usr/share/applications" "$root/usr/share/pixmaps"
+            install -m 755 "dist/tapalog-messenger-linux-$arch" "$root/usr/bin/tapalog-messenger"
+            install -m 644 client/public/icons/icon-512.png "$root/usr/share/pixmaps/tapalog-messenger.png"
+            printf '%s\n' \
+              '[Desktop Entry]' \
+              'Type=Application' \
+              'Name=Tapalog Messenger' \
+              'Comment=Your own messenger server for family and friends' \
+              'Exec=/usr/bin/tapalog-messenger' \
+              'Icon=/usr/share/pixmaps/tapalog-messenger.png' \
+              'Terminal=false' \
+              'Categories=Network;Chat;' \
+              > "$root/usr/share/applications/tapalog-messenger.desktop"
+            printf '%s\n' \
+              'Package: tapalog-messenger' \
+              "Version: $VERSION" \
+              'Section: net' \
+              'Priority: optional' \
+              "Architecture: $debarch" \
+              'Maintainer: Alexander Kotov <alexandrkotov@users.noreply.github.com>' \
+              'Homepage: https://github.com/alexandrkotov/tapalog-messenger' \
+              'Description: Self-hosted messenger for family and friends' \
+              ' One program is the whole server: chats, photos, files, voice messages' \
+              ' and notifications, in an app people install from the browser. Start' \
+              ' it from the apps menu; stop it from its status page.' \
+              > "$root/DEBIAN/control"
+            dpkg-deb --build --root-owner-group "$root" "dist/tapalog-messenger_${VERSION}_${debarch}.deb"
+          done
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # The downloads people use, run on real machines before they are published.
+  smoke-macos:
+    name: Run the macOS download (Apple Silicon)
+    needs: build
+    runs-on: macos-14
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release
+          path: dist
+      - name: Unzip, check the version, start, stop
+        working-directory: dist
+        run: |
+          unzip tapalog-messenger-macos-arm64.zip
+          test "$(./tapalog-messenger-macos-arm64 --version)" = "${{ needs.build.outputs.version }}"
+          ./tapalog-messenger-macos-arm64 --port 18443 --no-open > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://localhost:18443/healthz -o health.json 2>/dev/null && break; sleep 1; done
+          cat server.log
+          grep -q '"version":"${{ needs.build.outputs.version }}"' health.json
+          curl -fsS -X POST -H "X-Admin-Key: $(cat messenger-data/admin.key)" http://localhost:18443/shutdown
+
+  smoke-deb:
+    name: Install the .deb, run it, remove it
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release
+          path: dist
+      - name: Check the checksums
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS
+      - name: Install
+        run: |
+          sudo dpkg -i "dist/tapalog-messenger_${{ needs.build.outputs.version }}_amd64.deb"
+          test -x /usr/bin/tapalog-messenger
+          grep -q '^Exec=/usr/bin/tapalog-messenger$' /usr/share/applications/tapalog-messenger.desktop
+          test -f /usr/share/pixmaps/tapalog-messenger.png
+      - name: Run it from /usr/bin, where it cannot write next to itself
+        run: |
+          test "$(tapalog-messenger --version)" = "${{ needs.build.outputs.version }}"
+          tapalog-messenger --port 18443 --no-open > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://localhost:18443/healthz >/dev/null 2>&1 && break; sleep 1; done
+          cat server.log
+          test -f ~/.tapalog-messenger/messenger.db
+          curl -fsS -X POST -H "X-Admin-Key: $(cat ~/.tapalog-messenger/admin.key)" http://localhost:18443/shutdown
+      - name: Remove
+        run: |
+          sudo dpkg -r tapalog-messenger
+          test ! -e /usr/bin/tapalog-messenger
+
+  publish:
+    name: Publish the GitHub Release
+    needs: [build, smoke-macos, smoke-deb]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release
+          path: dist
+      - uses: softprops/action-gh-release@v3
+        with:
+          name: Tapalog Messenger ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            One program is the whole server. Download the one for your computer, start it, and its status page opens in the browser.
+
+            | Computer | Download |
+            | --- | --- |
+            | Windows | `tapalog-messenger-windows-x64.exe` |
+            | Mac with Apple Silicon (M1 and later) | `tapalog-messenger-macos-arm64.zip` |
+            | Mac with Intel | `tapalog-messenger-macos-x64.zip` |
+            | Linux | `tapalog-messenger-linux-x64` or `tapalog-messenger-linux-arm64` |
+            | Debian, Ubuntu, Chromebook (Linux) | `tapalog-messenger_${{ needs.build.outputs.version }}_amd64.deb` or `_arm64.deb` |
+
+            The downloads are not code-signed.
+            - **Windows** warns on first start ("Windows protected your PC"): click **More info**, then **Run anyway**.
+            - **macOS** (13 Ventura or later): unzip, then in Terminal, in that folder: `xattr -d com.apple.quarantine tapalog-messenger-macos-* && ./tapalog-messenger-macos-*`
+            - **Linux**: `chmod +x tapalog-messenger-linux-*` once, then run it.
+
+            `SHA256SUMS` lists the checksum of every file. Backups and how to restore one are in the [README](https://github.com/alexandrkotov/tapalog-messenger#backups).
+          files: dist/*

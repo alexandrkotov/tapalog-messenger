@@ -4,13 +4,16 @@ A self-hosted web messenger whose whole server is one executable file.
 Run it from any folder with nothing else installed; the PWA client is built in,
 and all state lives in a `messenger-data/` folder next to the binary.
 
-Status: Stage 2 — media and PWA. Sign-up by invite link, direct chats and
-groups, replies, edits, deletes, reactions, sent / delivered / read ticks,
-typing and online status, several devices per account, catch-up after a lost
-connection. Photos, files (up to 50 MB) and voice messages; recent chats and an
-outbox that work without a network; push notifications while the app is closed
-(on iPhone and iPad only from the Home Screen app). Profile pictures and search
-come next.
+Status: Stage 3 — search, profiles, administration, backups, releases.
+Sign-up by invite link, direct chats and groups, replies, edits, deletes,
+reactions, sent / delivered / read ticks, typing and online status, several
+devices per account, catch-up after a lost connection. Photos, files (up to
+50 MB) and voice messages; recent chats and an outbox that work without a
+network; push notifications while the app is closed (on iPhone and iPad only
+from the Home Screen app). Search by any part of a word across all chats or in
+one; profile and group photos; a light or dark theme. Administrators block
+people, make password-reset links and see the disk space used. Backups every
+day and on demand.
 
 - Stack: Bun + TypeScript, `bun build --compile` for Windows, Linux and macOS
 - Storage: SQLite (WAL) via `bun:sqlite`
@@ -20,6 +23,32 @@ come next.
 
 **Privacy:** messages are not end-to-end encrypted yet. Whoever runs the server
 can read them in its database.
+
+## Download
+
+Every version is on the [Releases](https://github.com/alexandrkotov/tapalog-messenger/releases)
+page, with `SHA256SUMS`:
+
+| Computer | File |
+| --- | --- |
+| Windows | `tapalog-messenger-windows-x64.exe` |
+| Mac, Apple Silicon (M1 and later) | `tapalog-messenger-macos-arm64.zip` |
+| Mac, Intel | `tapalog-messenger-macos-x64.zip` |
+| Linux | `tapalog-messenger-linux-x64`, `tapalog-messenger-linux-arm64` |
+| Debian, Ubuntu, Chromebook (Linux) | `tapalog-messenger_<version>_amd64.deb`, `_arm64.deb` |
+
+The files are not code-signed:
+
+- **Windows** warns on the first start ("Windows protected your PC"). Click
+  **More info**, then **Run anyway**.
+- **macOS** 13 (Ventura) or later. Unzip, then in Terminal, in that folder:
+  `xattr -d com.apple.quarantine tapalog-messenger-macos-*` and start it.
+- **Linux**: `chmod +x tapalog-messenger-linux-*` once. The `.deb` adds
+  "Tapalog Messenger" to the apps menu and keeps its data in
+  `~/.tapalog-messenger`.
+
+A release is made by pushing a tag: `git tag v0.3.0 && git push --tags`. The
+version in the tag goes into the binaries.
 
 ## Running
 
@@ -36,8 +65,10 @@ notifications are made on first start and kept in `messenger-data/vapid.json`;
 losing them only means everyone turns notifications on again.
 
 While there are no accounts yet, the status page shows a link for creating the
-first one, which becomes the admin. The admin makes invite links for everyone
-else in Settings; the status page can make them too.
+first one, which becomes the admin. Administrators manage the server in
+Settings → Server: invite links, blocking and unblocking people, admin rights,
+one-time password-reset links (valid 24 hours), and the disk space used. The
+status page can make invite links too.
 
 ### From the internet
 
@@ -54,6 +85,32 @@ later starts need no flags. `--no-tunnel` skips the tunnel for one run,
 `--forget-tunnel` deletes the token. `--quick-tunnel` gives a temporary
 `*.trycloudflare.com` address for a demo; it changes on every start, so
 installed apps and sign-ins do not survive a restart.
+
+## Backups
+
+A backup is a folder in `messenger-backups/`, next to `messenger-data/`, named
+by date and time (`2026-10-28_19-00`). It holds a consistent copy of the
+database (taken while the server runs), the uploaded files, `vapid.json` and
+`config.json`. Uploaded files never change, so they are hard links rather
+than copies where the disk allows, and seven backups take little more room
+than one. `admin.key` is not copied; a new one is made on every start.
+
+- One is made an hour after start and then every 24 hours; the newest 7 are
+  kept.
+- **Back up now** on the status page makes one at once.
+- `tapalog-messenger backup [--data <dir>]` makes one from the command line,
+  also while the server runs.
+
+A backup holds every message and the tunnel token: keep it as private as
+`messenger-data/` itself.
+
+To restore:
+
+1. Stop the server (Stop server on the status page).
+2. Rename `messenger-data` to something else, e.g. `messenger-data-old`.
+3. Copy the backup folder next to the program and rename the copy to
+   `messenger-data`.
+4. Start the server.
 
 ## Development
 

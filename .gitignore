@@ -7,6 +7,7 @@ dist/
 # Runtime data next to the binary: database, media, config with the tunnel
 # token, VAPID keys, TLS keys. Never committed.
 messenger-data/
+messenger-backups/
 
 # Downloaded-at-build-time sidecar binaries (cloudflared, later TURN).
 vendor/
