@@ -90,6 +90,32 @@ describe("register and log in", () => {
       await own.server.stop();
     }
   });
+
+  it("behind a proxy, counts tries per client address from X-Forwarded-For, not per proxy", async () => {
+    const own = testServer({ behindProxy: true });
+    try {
+      const c = new Client(own.base);
+      // Caddy appends the address it saw; whatever the client sent comes before it.
+      const tryOnce = (xff: string) => c.call("POST", "/api/auth/login", { username: "x", password: "y" }, { "X-Forwarded-For": xff });
+      for (let i = 0; i < 10; i++) expect((await tryOnce(`10.9.9.${i}, 203.0.113.5`)).status).toBe(401);
+      expect((await tryOnce("203.0.113.5")).status).toBe(429);
+      expect((await tryOnce("203.0.113.6")).status).toBe(401);
+      expect((await tryOnce("203.0.113.5, 203.0.113.7")).status).toBe(401); // a forged first entry does not matter
+    } finally {
+      await own.server.stop();
+    }
+  });
+
+  it("without --behind-proxy, X-Forwarded-For is ignored", async () => {
+    const own = testServer();
+    try {
+      const c = new Client(own.base);
+      for (let i = 0; i < 10; i++) await c.call("POST", "/api/auth/login", { username: "x", password: "y" }, { "X-Forwarded-For": `203.0.113.${i}` });
+      expect((await c.call("POST", "/api/auth/login", { username: "x", password: "y" }, { "X-Forwarded-For": "203.0.113.99" })).status).toBe(429);
+    } finally {
+      await own.server.stop();
+    }
+  });
 });
 
 describe("guards", () => {

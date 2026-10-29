@@ -14,6 +14,8 @@ import * as chats from "./store/chats";
 export interface SocketData {
   userId: number;
   deviceId: number;
+  /** The client's address, as the server worked it out (behind a proxy, not the proxy's). */
+  ip: string;
 }
 
 type Socket = ServerWebSocket<SocketData>;
@@ -106,7 +108,7 @@ export class Hub {
       const send = (frame: ServerFrame): void => {
         ws.send(JSON.stringify(frame));
       };
-      if (!this.frames.hit(`${ws.data.deviceId}:${ws.remoteAddress}`, this.now())) return send({ t: "error", code: "rate_limited" });
+      if (!this.frames.hit(`${ws.data.deviceId}:${ws.data.ip}`, this.now())) return send({ t: "error", code: "rate_limited" });
       let frame: ClientFrame | null = null;
       try {
         frame = parseClientFrame(JSON.parse(typeof raw === "string" ? raw : raw.toString("utf-8")));

@@ -42,6 +42,13 @@ export interface ServerOptions {
    * otherwise looks like it came from this computer.
    */
   trustCfConnectingIp?: boolean;
+  /**
+   * A reverse proxy on this machine (Caddy on a VPS) carries the traffic.
+   * The client IP is then the last X-Forwarded-For address, believed only
+   * when the connection itself comes from loopback; and the admin addresses
+   * refuse anything that came through the proxy.
+   */
+  behindProxy?: boolean;
   health: HealthResponse;
   status: () => StatusInfo;
   /** Called after a valid POST /shutdown has been answered. */
@@ -60,6 +67,17 @@ export interface ServerHandle {
 
 /** Paths the client router never owns, so they never fall back to index.html. */
 const RESERVED_PREFIXES = ["/api/", "/ws", "/media/", "/healthz", "/status", "/shutdown", "/admin/"];
+
+/** The status page and the host's own controls: admin key only, and never through a proxy. */
+const ADMIN_PATHS = new Set(["/status", "/status.json", "/shutdown", "/admin/invite", "/admin/backup"]);
+
+export const isLoopback = (address: string | undefined) => !!address && (address === "::1" || /^(::ffff:)?127\./.test(address));
+
+/** The address Caddy saw: it appends the peer it got the request from, so the last entry is the one that cannot be forged. */
+export function lastForwardedFor(header: string | null): string | null {
+  const last = header?.split(",").at(-1)?.trim();
+  return last || null;
+}
 
 /** Time clients get to hear the close frame before the listener goes away. */
 const CLOSE_GRACE_MS = 300;
@@ -139,7 +157,13 @@ export function startServer(opts: ServerOptions): ServerHandle {
     async fetch(req, server) {
       const url = new URL(req.url);
       const { pathname } = url;
-      const ip = () => (opts.trustCfConnectingIp && req.headers.get("CF-Connecting-IP")) || server.requestIP(req)?.address || "unknown";
+      const peer = server.requestIP(req)?.address;
+      const proxied = opts.behindProxy === true && isLoopback(peer) && req.headers.has("X-Forwarded-For");
+      const ip = () =>
+        (proxied && lastForwardedFor(req.headers.get("X-Forwarded-For"))) ||
+        (opts.trustCfConnectingIp && req.headers.get("CF-Connecting-IP")) ||
+        peer ||
+        "unknown";
 
       if (pathname === "/healthz") return json(opts.health);
 
@@ -156,11 +180,13 @@ export function startServer(opts: ServerOptions): ServerHandle {
         if (!originAllowed(req, origins)) return error("bad_origin");
         const session = authenticate(opts.db, req, now());
         if (!session) return error("unauthorized");
-        if (server.upgrade(req, { data: { userId: session.user.id, deviceId: session.deviceId } })) return undefined;
+        if (server.upgrade(req, { data: { userId: session.user.id, deviceId: session.deviceId, ip: ip() } })) return undefined;
         return text("Expected a WebSocket", 400);
       }
 
-      if (pathname === "/status" || pathname === "/status.json" || pathname === "/shutdown" || pathname === "/admin/invite" || pathname === "/admin/backup") {
+      if (ADMIN_PATHS.has(pathname)) {
+        // On a VPS the status page is reached over an SSH tunnel only.
+        if (proxied) return text("Not Found", 404);
         if (!keyMatches(opts.adminKey, adminKeyOf(req, url))) return text("Forbidden", 403);
         if (pathname === "/status.json") {
           const st = statusWithExtras();

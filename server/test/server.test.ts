@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { APP_ID } from "@tapalog-messenger/shared";
 import { migrate } from "../src/db";
-import { startServer, type ServerHandle } from "../src/server";
+import { isLoopback, lastForwardedFor, startServer, type ServerHandle } from "../src/server";
+import { testServer } from "./helpers";
 
 const KEY = "k".repeat(64);
 let server: ServerHandle;
@@ -92,5 +93,34 @@ describe("server", () => {
     const res = await fetch(`${base}/healthz`, { headers: { Origin: "https://evil.example" } });
     expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  });
+});
+
+describe("behind a proxy", () => {
+  it("keeps the status page and admin controls off the proxy, but open over an SSH tunnel", async () => {
+    const t = testServer({ behindProxy: true, publicUrl: "https://m.example.com" });
+    try {
+      const key = { "X-Admin-Key": "k".repeat(64) };
+      const viaProxy = { ...key, "X-Forwarded-For": "203.0.113.5" };
+      for (const path of ["/status", "/status.json"]) {
+        expect((await fetch(t.base + path, { headers: viaProxy })).status).toBe(404);
+        expect((await fetch(t.base + path, { headers: key })).status).toBe(200);
+      }
+      for (const path of ["/shutdown", "/admin/invite", "/admin/backup"]) {
+        expect((await fetch(t.base + path, { method: "POST", headers: viaProxy })).status).toBe(404);
+      }
+      expect((await fetch(`${t.base}/healthz`, { headers: viaProxy })).status).toBe(200);
+    } finally {
+      await t.server.stop();
+    }
+  });
+
+  it("believes only the last X-Forwarded-For entry, and only from loopback", () => {
+    expect(lastForwardedFor("198.51.100.1, 203.0.113.5")).toBe("203.0.113.5");
+    expect(lastForwardedFor(" 203.0.113.5 ")).toBe("203.0.113.5");
+    expect(lastForwardedFor("")).toBeNull();
+    expect(lastForwardedFor(null)).toBeNull();
+    for (const a of ["127.0.0.1", "127.1.2.3", "::1", "::ffff:127.0.0.1"]) expect(isLoopback(a)).toBe(true);
+    for (const a of ["10.0.0.1", "203.0.113.5", "::ffff:10.0.0.1", "fe80::1", undefined]) expect(isLoopback(a)).toBe(false);
   });
 });

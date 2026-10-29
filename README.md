@@ -86,6 +86,82 @@ later starts need no flags. `--no-tunnel` skips the tunnel for one run,
 `*.trycloudflare.com` address for a demo; it changes on every start, so
 installed apps and sign-ins do not survive a restart.
 
+### On a VPS
+
+Without Cloudflare: a Linux server with its own IP address, [Caddy](https://caddyserver.com)
+in front for HTTPS, and the messenger as a systemd service. Shown for Ubuntu
+24.04 and the address `messenger.example.com`.
+
+1. **DNS.** An `A` record for `messenger.example.com` with the server's IPv4
+   address. If the zone is on Cloudflare, set it to *DNS only* (grey cloud).
+2. **Firewall.** Open only SSH and the web:
+
+   ```sh
+   sudo ufw limit 22/tcp && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw allow 443/udp && sudo ufw enable
+   ```
+
+3. **Caddy**, from [its own repository](https://caddyserver.com/docs/install#debian-ubuntu-raspbian)
+   (Ubuntu's package is old). `/etc/caddy/Caddyfile`:
+
+   ```
+   messenger.example.com {
+   	@admin path /status /status.json /shutdown /admin/*
+   	respond @admin 404
+   	reverse_proxy 127.0.0.1:8443
+   }
+   ```
+
+   Then `sudo systemctl reload caddy`. Caddy gets and renews the certificate
+   by itself.
+4. **The service.** Copy `tapalog-messenger-linux-x64` to the server and run:
+
+   ```sh
+   chmod +x tapalog-messenger-linux-x64
+   sudo ./tapalog-messenger-linux-x64 service install --public-url https://messenger.example.com
+   ```
+
+   This puts the binary in `/usr/local/bin`, creates the user `tapalog`, keeps
+   the data in `/var/lib/tapalog-messenger/messenger-data` (backups beside it,
+   in `messenger-backups`), and starts the service with `--behind-proxy`. It
+   starts by itself after a reboot and again after a crash. The link for the
+   first account is in the log: `journalctl -u tapalog-messenger -n 50`.
+
+`--behind-proxy` takes each person's address from Caddy's `X-Forwarded-For`
+(only on connections from the server itself), so the sign-in limits count per
+person and not for everyone at once. It also refuses the status page and the
+admin controls to anything that came through Caddy.
+
+**The status page** is reached through SSH only. From your own computer:
+
+```sh
+ssh -L 8443:127.0.0.1:8443 you@your-server
+```
+
+then open `http://localhost:8443/status?key=…`, with the key from
+`sudo cat /var/lib/tapalog-messenger/messenger-data/admin.key`.
+
+**Updating:** copy the new binary to the server, then
+
+```sh
+sudo tapalog-messenger service update ./tapalog-messenger-linux-x64
+```
+
+It makes a backup, keeps the running binary as `tapalog-messenger.prev`,
+starts the new one and waits for it to answer. If it does not, the previous
+binary is put back. Going back to an older binary does not undo a database
+change the new version made; then restore the backup made just before (see
+Backups).
+
+`sudo tapalog-messenger service uninstall` removes the service and the binary;
+the data stays in `/var/lib/tapalog-messenger`.
+
+**Moving from another computer:** stop the old server, copy its
+`messenger-data` folder to `/var/lib/tapalog-messenger/messenger-data` (with
+the service stopped: `sudo systemctl stop tapalog-messenger`), run
+`service install` again so the files get the right owner, and point the DNS
+record at the new server. Sign-ins, installed apps and notifications carry
+over, because the address stays the same.
+
 ## Backups
 
 A backup is a folder in `messenger-backups/`, next to `messenger-data/`, named

@@ -15,6 +15,7 @@ import { DB_FILE_NAME, openDatabase, schemaVersion } from "./db";
 import { cleanUpExtracted, cloudflaredPath } from "./embedded";
 import { openInBrowser } from "./openInBrowser";
 import { startServer, type ServerHandle } from "./server";
+import { serviceCommand } from "./service";
 import { createInvite, ensureSetupInvite } from "./store/accounts";
 import { loadOrCreateVapid } from "./push";
 import { startTunnel, type Tunnel, type TunnelMode, type TunnelState } from "./tunnel";
@@ -82,6 +83,7 @@ async function main(): Promise<number> {
   }
   if (args.checkTunnelBinary) return checkTunnelBinary();
   if (args.command === "backup") return backupCommand(args.data);
+  if (args.service) return serviceCommand(args.service.action, { publicUrl: args.publicUrl, port: args.port, file: args.service.file });
 
   console.log(`Tapalog Messenger ${pkg.version}`);
   const dataDir = resolveDataDir({ flag: args.data, execPath: process.execPath, compiled: isCompiled(), cwd: process.cwd(), home: homedir() });
@@ -113,6 +115,10 @@ async function main(): Promise<number> {
       : null;
   if (tunnelMode?.kind === "named" && !config.public_url) {
     console.error("The tunnel needs its address once: start with --public-url https://<the tunnel's hostname>, e.g. https://messenger.tapalog.com");
+    return 2;
+  }
+  if (args.behindProxy && (tunnelMode?.kind === "quick" || !config.public_url)) {
+    console.error("--behind-proxy needs the address people open: add --public-url https://<host>, e.g. https://messenger.tapalog.com");
     return 2;
   }
   // A quick tunnel's address is only known once it connects.
@@ -153,6 +159,7 @@ async function main(): Promise<number> {
       push: { vapid },
       publicUrl: initialPublicUrl,
       trustCfConnectingIp: tunnelMode !== null,
+      behindProxy: args.behindProxy,
       health: { app: APP_ID, ok: true, version: pkg.version, schema },
       status: () => {
         const setup = ensureSetupInvite(db, Date.now());
@@ -197,6 +204,7 @@ async function main(): Promise<number> {
     console.log(`  Admin invite, one use, valid 24 hours: ${inviteDto(row, inviteBase()).url}`);
   }
   console.log(`  Status page (keep this link private): ${statusUrl}`);
+  if (args.behindProxy) console.log(`  Behind a proxy it is not reachable from outside: ssh -L ${args.port}:127.0.0.1:${args.port} <you>@<this server> first.`);
   if (args.open) void openInBrowser(statusUrl);
 
   if (tunnelMode) {
