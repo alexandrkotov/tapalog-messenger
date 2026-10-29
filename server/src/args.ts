@@ -1,3 +1,4 @@
+import { isTurnUrl } from "./turn";
 import { parseTunnelToken } from "./tunnel";
 
 /** Command-line options. Kept to plain flags so a non-technical host can double-click the binary and get sensible defaults. */
@@ -23,6 +24,10 @@ export interface Args {
   noTunnel: boolean;
   /** --forget-tunnel: delete the saved tunnel token. */
   forgetTunnel: boolean;
+  /** --turn-url (repeatable): the calls relay's addresses, saved in config.json. */
+  turnUrls: string[];
+  /** --turn-secret-file: a file with the secret shared with coturn, read once and saved in config.json. */
+  turnSecretFile: string | null;
   /** --behind-proxy: a reverse proxy on this machine (Caddy) carries the traffic. */
   behindProxy: boolean;
   /** --check-tunnel-binary (CI): run the embedded cloudflared's --version and exit. */
@@ -41,6 +46,7 @@ export const USAGE = `Usage: tapalog-messenger [options]
                  Back up the data folder into messenger-backups/ beside it and exit
                  (works while the server runs)
        tapalog-messenger service install --public-url <https://host> [--port <n>]
+                 [--turn-url <url>]... [--turn-secret-file <file>]
        tapalog-messenger service update <new binary>
        tapalog-messenger service uninstall
                  Linux, as root: run as a systemd service behind a reverse proxy
@@ -53,6 +59,12 @@ export const USAGE = `Usage: tapalog-messenger [options]
                  Address the server is reachable at from outside (saved for next time)
   --behind-proxy Behind a reverse proxy on this machine: take the client's
                  address from X-Forwarded-For, and keep the status page off it
+  --turn-url <turn:host:3478>
+                 A TURN relay (coturn) for calls; repeat for each address,
+                 e.g. turn:…:3478, turn:…:3478?transport=tcp, turns:…:5349
+  --turn-secret-file <file>
+                 File with the secret shared with coturn (use-auth-secret)
+                 Both are saved for next time.
   --invite       Print a new single-use admin invite link (e.g. to regain access)
   --tunnel-token <token>
                  Connect a named Cloudflare Tunnel (saved for next time;
@@ -91,6 +103,8 @@ export function parseArgs(argv: string[]): Args {
     quickTunnel: false,
     noTunnel: false,
     forgetTunnel: false,
+    turnUrls: [],
+    turnSecretFile: null,
     behindProxy: false,
     checkTunnelBinary: false,
     version: false,
@@ -155,6 +169,15 @@ export function parseArgs(argv: string[]): Args {
       case "--forget-tunnel":
         args.forgetTunnel = true;
         break;
+      case "--turn-url": {
+        const url = value();
+        if (!isTurnUrl(url)) throw new ArgsError(`--turn-url must look like turn:host:3478 or turns:host:5349, not ${url}`);
+        args.turnUrls.push(url);
+        break;
+      }
+      case "--turn-secret-file":
+        args.turnSecretFile = value();
+        break;
       case "--behind-proxy":
         args.behindProxy = true;
         break;
@@ -177,7 +200,7 @@ export function parseArgs(argv: string[]): Args {
   }
   if (args.service) {
     const given = argv.slice(start).filter((a) => a.startsWith("--"));
-    const allowed = args.service.action === "install" ? ["--public-url", "--port"] : [];
+    const allowed = args.service.action === "install" ? ["--public-url", "--port", "--turn-url", "--turn-secret-file"] : [];
     const extra = given.find((a) => !allowed.includes(a));
     if (extra) throw new ArgsError(`service ${args.service.action} does not take ${extra}`);
     if (args.service.action === "install" && !args.publicUrl) throw new ArgsError("service install needs --public-url https://<the address people open>");

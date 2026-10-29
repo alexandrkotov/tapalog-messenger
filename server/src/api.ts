@@ -11,6 +11,7 @@ import type { Hub } from "./hub";
 import * as accounts from "./store/accounts";
 import * as chats from "./store/chats";
 import * as media from "./store/media";
+import { turnCredentials, type TurnConfig } from "./turn";
 
 /** REST under /api/. Everything except register and login needs a session. */
 
@@ -25,6 +26,8 @@ export interface ApiContext {
   inviteBase: () => string;
   /** Room taken by the data folder, for the «Server» section. */
   disk: () => DiskUsageDto;
+  /** The calls relay, when one is set up. */
+  turn: TurnConfig | null;
   now: () => number;
 }
 
@@ -324,6 +327,7 @@ export function createApi(ctx: ApiContext) {
     }
     if (parts[0] === "invites" && parts.length <= 2) return invites(req, s, parts[1]);
     if (route === "media" && req.method === "POST") return ctx.files.upload(req, url, s);
+    if (route === "turn" && req.method === "GET") return ctx.turn ? json(turnCredentials(ctx.turn, s.user.id, ctx.now())) : error("turn_not_configured");
     if (route === "push/key" && req.method === "GET") return ctx.push ? json({ public_key: ctx.push.publicKey }) : error("not_found");
     if (route === "push/subscribe" && (req.method === "POST" || req.method === "DELETE")) return pushSubscription(req, s);
     if (parts[0] === "media" && parts[2] === "thumb" && parts.length === 3 && req.method === "PUT") return ctx.files.putThumb(req, parts[1]!, s);

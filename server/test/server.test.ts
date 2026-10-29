@@ -35,7 +35,7 @@ beforeAll(() => {
       "/sw.js": file("sw.js", "// sw"),
     },
     health: { app: APP_ID, ok: true, version: "1.2.3", schema: 1 },
-    status: () => ({ version: "1.2.3", schema: 1, localUrl: "http://localhost", publicUrl: null, setupInviteUrl: null, tunnel: null, addressChangedFrom: null, dataDir: "/data", startedAt: "now" }),
+    status: () => ({ version: "1.2.3", schema: 1, localUrl: "http://localhost", publicUrl: null, setupInviteUrl: null, tunnel: null, addressChangedFrom: null, dataDir: "/data", startedAt: "now", turnUrls: null, restartsWhenStopped: false }),
     onShutdownRequested: () => shutdownCalls++,
   });
   base = `http://localhost:${server.port}`;

@@ -8,7 +8,7 @@ import { startServer, type ServerHandle, type ServerOptions } from "../src/serve
 import { createInvite } from "../src/store/accounts";
 
 /** A real server on a free port with an in-memory database. */
-export function testServer(opts: { publicUrl?: string; trustCfConnectingIp?: boolean; behindProxy?: boolean; push?: ServerOptions["push"] } = {}) {
+export function testServer(opts: { publicUrl?: string; trustCfConnectingIp?: boolean; behindProxy?: boolean; turn?: ServerOptions["turn"]; push?: ServerOptions["push"] } = {}) {
   const db = new Database(":memory:", { strict: true });
   db.run("PRAGMA foreign_keys = ON");
   migrate(db);
@@ -21,9 +21,10 @@ export function testServer(opts: { publicUrl?: string; trustCfConnectingIp?: boo
     publicUrl: opts.publicUrl ?? null,
     trustCfConnectingIp: opts.trustCfConnectingIp,
     behindProxy: opts.behindProxy,
+    turn: opts.turn,
     push: opts.push,
     health: { app: APP_ID, ok: true, version: "0", schema: 4 },
-    status: () => ({ version: "0", schema: 4, localUrl: "", publicUrl: null, setupInviteUrl: null, tunnel: null, addressChangedFrom: null, dataDir: "", startedAt: "" }),
+    status: () => ({ version: "0", schema: 4, localUrl: "", publicUrl: null, setupInviteUrl: null, tunnel: null, addressChangedFrom: null, dataDir: "", startedAt: "", turnUrls: null, restartsWhenStopped: false }),
   });
   const base = `http://localhost:${server.port}`;
   const invite = (grantsAdmin = false) => createInvite(db, { createdBy: null, grantsAdmin, maxUses: 1, expiresAt: null, now: Date.now() }).code;

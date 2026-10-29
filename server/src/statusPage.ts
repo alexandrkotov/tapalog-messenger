@@ -17,6 +17,10 @@ export interface StatusInfo {
   addressChangedFrom: string | null;
   dataDir: string;
   startedAt: string;
+  /** The calls relay's addresses, or null when there is none. */
+  turnUrls: string[] | null;
+  /** A service manager (systemd) starts the server again when it exits: the Stop button restarts it. */
+  restartsWhenStopped: boolean;
   /** Filled in by the server when the page is shown. */
   disk?: DiskUsageDto;
   /** Where backups go and the newest one; absent when backups are off. */
@@ -77,6 +81,7 @@ export function renderStatusPage(info: StatusInfo, nonce: string): string {
     ...(info.publicUrl ? ([["Address for everyone", link(info.publicUrl)]] as [string, string][]) : []),
     ...(info.tunnel ? ([["Internet access", `<span id="tunnel">${escapeHtml(tunnelText(info.tunnel))}</span>`]] as [string, string][]) : []),
     ["Address on this computer", link(info.localUrl)],
+    ["Calls relay (TURN)", info.turnUrls ? info.turnUrls.map((u) => `<code>${escapeHtml(u)}</code>`).join("<br>") : "Not set up: calls go directly or not at all"],
     ["Data folder", `<code>${escapeHtml(info.dataDir)}</code>`],
     ...(info.disk ? ([["Space used", escapeHtml(diskText(info.disk))]] as [string, string][]) : []),
     ...(info.backups
@@ -124,7 +129,7 @@ export function renderStatusPage(info: StatusInfo, nonce: string): string {
   ${info.addressChangedFrom ? `<p class="warn">The address changed from ${escapeHtml(info.addressChangedFrom)}. Everyone has to open the new address and install the app and notifications again.</p>` : ""}
   <dl>${rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("")}</dl>
   ${info.publicUrl && (!info.tunnel || info.tunnel.state === "connected") ? `<div class="qr" title="${escapeHtml(info.publicUrl)}">${qrSvg(info.publicUrl)}</div>` : ""}
-  <p class="actions"><button id="invite" type="button">Create an invite link</button>${info.backups ? ' <button id="backup" type="button">Back up now</button>' : ""} <button id="stop" type="button">Stop server</button></p>
+  <p class="actions"><button id="invite" type="button">Create an invite link</button>${info.backups ? ' <button id="backup" type="button">Back up now</button>' : ""} <button id="stop" type="button">${info.restartsWhenStopped ? "Restart server" : "Stop server"}</button></p>
   <p id="invite-out" class="out" hidden></p>
   ${info.backups ? '<p class="hint">A backup holds every message and the tunnel token: keep it as private as the data folder. To restore, see the README.</p>' : ""}
 </main>
@@ -160,7 +165,9 @@ export function renderStatusPage(info: StatusInfo, nonce: string): string {
   document.getElementById("stop").addEventListener("click", async (event) => {
     event.target.disabled = true;
     const res = await fetch("/shutdown", { method: "POST", headers: { "X-Admin-Key": key } }).catch(() => null);
-    document.getElementById("state").textContent = res && res.ok ? "Server stopped. You can close this tab." : "Could not stop the server.";
+    const restarts = ${info.restartsWhenStopped};
+    document.getElementById("state").textContent =
+      res && res.ok ? (restarts ? "Restarting. Reload this page in a few seconds." : "Server stopped. You can close this tab.") : "Could not stop the server.";
   });
 </script>
 </body>

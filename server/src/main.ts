@@ -8,7 +8,7 @@ import { generateAdminKey, readAdminKey, writeAdminKey } from "./adminKey";
 import { ArgsError, parseArgs, USAGE } from "./args";
 import { inviteDto } from "./api";
 import { assets } from "./clientAssets.gen";
-import { readConfig, writeConfig, type Config } from "./config";
+import { readConfig, withTurnFlags, writeConfig, type Config } from "./config";
 import { ensureDataDir, isCompiled, resolveDataDir } from "./dataDir";
 import { backupsDirFor, makeBackup } from "./backup";
 import { DB_FILE_NAME, openDatabase, schemaVersion } from "./db";
@@ -83,7 +83,9 @@ async function main(): Promise<number> {
   }
   if (args.checkTunnelBinary) return checkTunnelBinary();
   if (args.command === "backup") return backupCommand(args.data);
-  if (args.service) return serviceCommand(args.service.action, { publicUrl: args.publicUrl, port: args.port, file: args.service.file });
+  if (args.service) {
+    return serviceCommand(args.service.action, { publicUrl: args.publicUrl, port: args.port, file: args.service.file, turnUrls: args.turnUrls, turnSecretFile: args.turnSecretFile });
+  }
 
   console.log(`Tapalog Messenger ${pkg.version}`);
   const dataDir = resolveDataDir({ flag: args.data, execPath: process.execPath, compiled: isCompiled(), cwd: process.cwd(), home: homedir() });
@@ -98,7 +100,13 @@ async function main(): Promise<number> {
   }
   // Flags given once are remembered, so the next start can be a plain double-click.
   const previousUrl = config.public_url ?? null;
-  const next: Config = { ...config };
+  let next: Config;
+  try {
+    next = withTurnFlags({ ...config }, args.turnUrls, args.turnSecretFile);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : err);
+    return 2;
+  }
   if (args.publicUrl) next.public_url = args.publicUrl;
   if (args.tunnelToken) next.tunnel_token = args.tunnelToken;
   if (args.forgetTunnel) delete next.tunnel_token;
@@ -148,6 +156,8 @@ async function main(): Promise<number> {
   let tunnelState: TunnelState | null = null;
   const inviteBase = () => server.publicUrl() ?? localUrl;
   const adminKey = generateAdminKey();
+  // systemd sets INVOCATION_ID for its services; the unit restarts the server whenever it exits.
+  const underSystemd = process.env.INVOCATION_ID !== undefined;
   try {
     server = startServer({
       port: args.port,
@@ -160,6 +170,7 @@ async function main(): Promise<number> {
       publicUrl: initialPublicUrl,
       trustCfConnectingIp: tunnelMode !== null,
       behindProxy: args.behindProxy,
+      turn: config.turn ?? null,
       health: { app: APP_ID, ok: true, version: pkg.version, schema },
       status: () => {
         const setup = ensureSetupInvite(db, Date.now());
@@ -173,6 +184,8 @@ async function main(): Promise<number> {
           addressChangedFrom,
           dataDir,
           startedAt,
+          turnUrls: config.turn?.urls ?? null,
+          restartsWhenStopped: underSystemd,
         };
       },
       onShutdownRequested: () => shutdown(),

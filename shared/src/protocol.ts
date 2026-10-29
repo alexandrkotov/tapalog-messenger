@@ -219,6 +219,13 @@ export interface PushPayload {
   lang: string;
 }
 
+/** GET /api/turn: short-lived TURN credentials, ready for RTCPeerConnection's iceServers. */
+export interface TurnDto {
+  ice_servers: { urls: string[]; username: string; credential: string }[];
+  /** When the credentials stop working (ms since epoch); fetch new ones before a call after that. */
+  expires_at: number;
+}
+
 export interface CreateInviteRequest {
   max_uses?: number;
   expires_in_days?: number;
@@ -243,7 +250,9 @@ export type ErrorCode =
   /** A password-reset link that is unknown, used or expired. */
   | "reset_invalid"
   /** The change would leave the server without an administrator. */
-  | "last_admin";
+  | "last_admin"
+  /** The server has no TURN relay set up, so calls can only go directly. */
+  | "turn_not_configured";
 
 export interface ErrorResponse {
   error: ErrorCode;

@@ -14,6 +14,7 @@ import { collectGarbage } from "./store/media";
 import { diskUsage } from "./disk";
 import { backupsDirFor, listBackups, makeBackup } from "./backup";
 import { renderStatusPage, tunnelText, type StatusInfo } from "./statusPage";
+import type { TurnConfig } from "./turn";
 
 /** URL path → file the binary can read (an embedded `$bunfs` path when compiled). */
 export type AssetMap = Readonly<Record<string, string>>;
@@ -49,6 +50,8 @@ export interface ServerOptions {
    * refuse anything that came through the proxy.
    */
   behindProxy?: boolean;
+  /** A TURN relay for calls (coturn); GET /api/turn hands out short-lived passwords for it. */
+  turn?: TurnConfig | null;
   health: HealthResponse;
   status: () => StatusInfo;
   /** Called after a valid POST /shutdown has been answered. */
@@ -115,7 +118,7 @@ export function startServer(opts: ServerOptions): ServerHandle {
     : null;
   if (push) hub.onNewMessage = (msg) => void push.newMessage(msg);
   const disk = () => diskUsage(opts.db.filename, opts.mediaDir);
-  const handleApi = createApi({ db: opts.db, hub, files, push, origins, inviteBase, disk, now });
+  const handleApi = createApi({ db: opts.db, hub, files, push, origins, inviteBase, disk, turn: opts.turn ?? null, now });
   const sweep = () => {
     try {
       collectGarbage(opts.db, opts.mediaDir, now());

@@ -98,7 +98,7 @@ describe("backups", () => {
       assets: {},
       backup: { dataDir: b.dir, dir: join(root, "more-backups") },
       health: { app: APP_ID, ok: true, version: "0", schema: MIGRATIONS.length },
-      status: () => ({ version: "0", schema: 4, localUrl: "", publicUrl: null, setupInviteUrl: null, tunnel: null, addressChangedFrom: null, dataDir: b.dir, startedAt: "" }),
+      status: () => ({ version: "0", schema: 4, localUrl: "", publicUrl: null, setupInviteUrl: null, tunnel: null, addressChangedFrom: null, dataDir: b.dir, startedAt: "", turnUrls: null, restartsWhenStopped: false }),
     });
     try {
       const base = `http://localhost:${server.port}`;

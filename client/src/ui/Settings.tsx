@@ -6,6 +6,7 @@ import { pushState, turnOff, turnOn, type PushState } from "../push";
 import { logout, setMe, useAppState } from "../state";
 import { savedTheme, setTheme, type Theme } from "../theme";
 import { AvatarEditor } from "./AvatarEditor";
+import { CallCheck } from "./CallCheck";
 import { errorText, Link, shortTime, useLang } from "./common";
 
 export function Settings() {
@@ -114,6 +115,8 @@ export function Settings() {
             )}
           </>
         )}
+
+        <CallCheck />
 
         <h3>{s.devices}</h3>
         <ul class="list">

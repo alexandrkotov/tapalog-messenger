@@ -46,6 +46,7 @@ const ERROR_STATUS: Record<ErrorCode, number> = {
   reset_invalid: 403,
   last_admin: 409,
   rate_limited: 429,
+  turn_not_configured: 404,
 };
 
 export function error(code: ErrorCode): Response {

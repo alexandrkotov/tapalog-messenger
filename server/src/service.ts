@@ -1,6 +1,7 @@
 import { chmodSync, copyFileSync, existsSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { APP_ID, type HealthResponse } from "@tapalog-messenger/shared";
 import { DEFAULT_PORT, type ServiceAction } from "./args";
+import { readConfig, withTurnFlags, writeConfig } from "./config";
 import { DATA_DIR_NAME, isCompiled } from "./dataDir";
 
 /**
@@ -34,8 +35,8 @@ Type=simple
 User=${SERVICE.user}
 Group=${SERVICE.user}
 ExecStart=${exec.join(" ")}
-Restart=on-failure
-RestartSec=5
+Restart=always
+RestartSec=3
 UMask=0027
 NoNewPrivileges=yes
 ProtectSystem=strict
@@ -100,12 +101,14 @@ const statusHint = (port: number) =>
     `  Log (first-account link, errors): journalctl -u ${SERVICE.name} -n 50`,
   ].join("\n");
 
-async function install(publicUrl: string, port: number) {
+async function install(publicUrl: string, port: number, turnUrls: string[], turnSecretFile: string | null) {
   if (!existsSync(SERVICE.binary) || realpathSync(process.execPath) !== realpathSync(SERVICE.binary)) placeBinary(process.execPath, SERVICE.binary);
   if (!succeeds(["id", "-u", SERVICE.user])) {
     run(["useradd", "--system", "--home-dir", SERVICE.home, "--no-create-home", "--shell", "/usr/sbin/nologin", SERVICE.user]);
   }
   run(["mkdir", "-p", SERVICE.data]);
+  // Root reads the TURN secret here, so its file can stay readable by root and coturn only.
+  if (turnUrls.length > 0 || turnSecretFile) writeConfig(SERVICE.data, withTurnFlags(readConfig(SERVICE.data), turnUrls, turnSecretFile));
   // Also data copied in by hand when moving from another computer.
   run(["chown", "-R", `${SERVICE.user}:${SERVICE.user}`, SERVICE.home]);
   chmodSync(SERVICE.home, 0o750);
@@ -173,17 +176,20 @@ function uninstall() {
   console.log(`  To delete it too: sudo userdel ${SERVICE.user} && sudo rm -r ${SERVICE.home}`);
 }
 
-export async function serviceCommand(action: ServiceAction, o: { publicUrl: string | null; port: number; file: string | null }): Promise<number> {
+export async function serviceCommand(
+  action: ServiceAction,
+  o: { publicUrl: string | null; port: number; file: string | null; turnUrls: string[]; turnSecretFile: string | null },
+): Promise<number> {
   try {
     if (process.platform !== "linux" || !existsSync("/run/systemd/system")) throw new ServiceError("service works on Linux with systemd only.");
     if (process.getuid?.() !== 0) throw new ServiceError(`Run it as root: sudo tapalog-messenger service ${action} …`);
     if (!isCompiled()) throw new ServiceError("service needs the released binary, not bun server/src/main.ts.");
-    if (action === "install") await install(o.publicUrl!, o.port);
+    if (action === "install") await install(o.publicUrl!, o.port, o.turnUrls, o.turnSecretFile);
     else if (action === "update") await update(o.file!);
     else uninstall();
     return 0;
   } catch (err) {
-    if (!(err instanceof ServiceError) && !(err instanceof Error && "code" in err)) throw err;
+    if (!(err instanceof Error)) throw err;
     console.error(err.message);
     return 1;
   }

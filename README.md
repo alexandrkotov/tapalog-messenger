@@ -123,8 +123,55 @@ in front for HTTPS, and the messenger as a systemd service. Shown for Ubuntu
    This puts the binary in `/usr/local/bin`, creates the user `tapalog`, keeps
    the data in `/var/lib/tapalog-messenger/messenger-data` (backups beside it,
    in `messenger-backups`), and starts the service with `--behind-proxy`. It
-   starts by itself after a reboot and again after a crash. The link for the
+   starts by itself after a reboot and again after a crash; **Restart server**
+   on the status page restarts it. The link for the
    first account is in the log: `journalctl -u tapalog-messenger -n 50`.
+
+5. **A relay for calls (coturn)**, optional. Calls go directly between
+   phones when they can; when a network does not allow that, they go through
+   a TURN relay. coturn and the messenger share a secret, and the messenger
+   gives each signed-in person a password for it that lasts 6 hours.
+
+   ```sh
+   sudo apt install coturn
+   sudo sh -c 'umask 077; openssl rand -hex 32 > /etc/tapalog-turn-secret'
+   ```
+
+   `/etc/turnserver.conf`:
+
+   ```
+   listening-port=3478
+   min-port=49160
+   max-port=49200
+   use-auth-secret
+   realm=messenger.example.com
+   fingerprint
+   no-cli
+   no-tls
+   no-dtls
+   no-multicast-peers
+   denied-peer-ip=10.0.0.0-10.255.255.255
+   denied-peer-ip=172.16.0.0-172.31.255.255
+   denied-peer-ip=192.168.0.0-192.168.255.255
+   ```
+
+   Then add the secret to it, so coturn and the messenger hold the same one:
+
+   ```sh
+   echo "static-auth-secret=$(sudo cat /etc/tapalog-turn-secret)" | sudo tee -a /etc/turnserver.conf >/dev/null
+   sudo chown root:turnserver /etc/turnserver.conf && sudo chmod 640 /etc/turnserver.conf
+   ```
+
+   ```sh
+   sudo ufw allow 3478 && sudo ufw allow 49160:49200/udp
+   sudo systemctl restart coturn
+   sudo tapalog-messenger service install --public-url https://messenger.example.com \
+     --turn-url turn:messenger.example.com:3478 --turn-url "turn:messenger.example.com:3478?transport=tcp" \
+     --turn-secret-file /etc/tapalog-turn-secret
+   ```
+
+   Settings → Calls → **Check the connection for calls** then shows whether
+   the relay can be reached from the network a phone is on, by UDP or TCP.
 
 `--behind-proxy` takes each person's address from Caddy's `X-Forwarded-For`
 (only on connections from the server itself), so the sign-in limits count per

@@ -26,7 +26,11 @@ export class OwnServer {
   readonly dataDir = mkdtempSync(join(tmpdir(), "tm-e2e-own-"));
   private proc: ChildProcess | null = null;
 
-  constructor(readonly port: number) {}
+  /** `extraArgs`: more flags for this server, e.g. a TURN relay. */
+  constructor(
+    readonly port: number,
+    private readonly extraArgs: string[] = [],
+  ) {}
 
   get url() {
     return `http://localhost:${this.port}`;
@@ -34,7 +38,7 @@ export class OwnServer {
 
   async start() {
     const [cmd, ...args] = serverCommand(this.port, this.dataDir).map((a) => a.replace(/^"(.*)"$/, "$1"));
-    this.proc = spawn(cmd!, args, { stdio: "ignore" });
+    this.proc = spawn(cmd!, [...args, ...this.extraArgs], { stdio: "ignore" });
     for (let i = 0; i < 100; i++) {
       if (await fetch(`${this.url}/healthz`).then((r) => r.ok, () => false)) return;
       await new Promise((r) => setTimeout(r, 100));

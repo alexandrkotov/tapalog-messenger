@@ -15,6 +15,8 @@ describe("parseArgs", () => {
       quickTunnel: false,
       noTunnel: false,
       forgetTunnel: false,
+      turnUrls: [],
+      turnSecretFile: null,
       behindProxy: false,
       checkTunnelBinary: false,
       version: false,
@@ -37,6 +39,8 @@ describe("parseArgs", () => {
       quickTunnel: false,
       noTunnel: false,
       forgetTunnel: false,
+      turnUrls: [],
+      turnSecretFile: null,
       behindProxy: true,
       checkTunnelBinary: false,
       version: true,
@@ -68,6 +72,16 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["service", "update", "--port", "9000"])).toThrow(ArgsError);
     expect(() => parseArgs(["service", "uninstall", "--no-open"])).toThrow(ArgsError);
     expect(() => parseArgs(["--no-open", "service", "install"])).toThrow(ArgsError);
+  });
+
+  it("reads the TURN relay's addresses and secret file", () => {
+    expect(
+      parseArgs(["--turn-url", "turn:t.example.com:3478", "--turn-url", "turn:t.example.com:3478?transport=tcp", "--turn-url", "turns:t.example.com:5349", "--turn-secret-file", "/etc/s"]),
+    ).toMatchObject({ turnUrls: ["turn:t.example.com:3478", "turn:t.example.com:3478?transport=tcp", "turns:t.example.com:5349"], turnSecretFile: "/etc/s" });
+    expect(parseArgs(["service", "install", "--public-url", "https://m.example.com", "--turn-url", "turn:t.example.com:3478", "--turn-secret-file", "/etc/s"]).turnUrls).toHaveLength(1);
+    for (const bad of ["https://t.example.com", "turn:", "turn:t.example.com:3478?transport=sctp", "stun:t.example.com:3478", "turn:user@t.example.com"]) {
+      expect(() => parseArgs(["--turn-url", bad])).toThrow(ArgsError);
+    }
   });
 
   it("rejects a bad port, a missing value and unknown flags", () => {
