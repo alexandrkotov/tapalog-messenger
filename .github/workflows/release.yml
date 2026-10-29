@@ -19,7 +19,10 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+      # The same Bun as in CI, so a release is the build that CI tested.
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
       - name: Version from the tag
         id: version
         run: |

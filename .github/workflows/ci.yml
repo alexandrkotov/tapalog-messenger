@@ -13,6 +13,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
       # Playwright's test runner is supported on Node, so the e2e step runs under it.
       - uses: actions/setup-node@v7
         with:
@@ -47,6 +49,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
       - run: bun install --frozen-lockfile
       - run: bun run build:client
       # cloudflared is pinned by version and SHA-256 in scripts/cloudflared.lock.json.

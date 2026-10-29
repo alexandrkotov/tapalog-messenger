@@ -114,7 +114,7 @@ To restore:
 
 ## Development
 
-Needs [Bun](https://bun.sh) 1.4+ and Node 22 (for Playwright).
+Needs [Bun](https://bun.sh) 1.4.0 (the version CI and releases are built with) and Node 22 (for Playwright).
 
 ```sh
 bun install
