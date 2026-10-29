@@ -157,7 +157,9 @@ test("a photo the quick decoder refuses still goes as a photo", async ({ browser
 });
 
 test.describe("recording", () => {
-  test.skip(({ browserName }) => browserName === "webkit", "Playwright's WebKit has no fake microphone");
+  // Playwright's WebKit build has no MediaRecorder at all (real Safari does; voice
+  // messages from iPhones were checked by hand on messenger.tapalog.com).
+  test.skip(({ browserName }) => browserName === "webkit", "Playwright's WebKit has no MediaRecorder");
 
   test("a voice message is recorded, sent and played in place", async ({ browser }) => {
     const alice = await signUp(browser, "Alice");

@@ -1,12 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { signUp, startChat } from "./people";
 
-test("notifications turn on and off from Settings", async ({ browser, browserName }) => {
+test("notifications turn on and off from Settings", async ({ browser }) => {
   // Headless browsers have no push service to reach and always refuse
   // notifications, so the permission and the subscription are stand-ins (with
   // real keys). What is checked is the app's side: asking, handing the
   // subscription to the server, and taking it back.
-  test.skip(browserName !== "chromium", "the stand-ins are written against Chromium's push API");
   const alice = await signUp(browser, "Alice");
   await alice.context.addInitScript(() => {
     let permission: NotificationPermission = "default";
