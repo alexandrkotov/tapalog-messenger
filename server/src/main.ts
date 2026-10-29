@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { APP_ID, type HealthResponse } from "@tapalog-messenger/shared";
@@ -9,7 +10,8 @@ import { inviteDto } from "./api";
 import { assets } from "./clientAssets.gen";
 import { readConfig, writeConfig, type Config } from "./config";
 import { ensureDataDir, isCompiled, resolveDataDir } from "./dataDir";
-import { openDatabase, schemaVersion } from "./db";
+import { backupsDirFor, makeBackup } from "./backup";
+import { DB_FILE_NAME, openDatabase, schemaVersion } from "./db";
 import { cleanUpExtracted, cloudflaredPath } from "./embedded";
 import { openInBrowser } from "./openInBrowser";
 import { startServer, type ServerHandle } from "./server";
@@ -41,6 +43,26 @@ async function checkTunnelBinary(): Promise<number> {
   return proc.exitCode === 0 ? 0 : 1;
 }
 
+/** `tapalog-messenger backup`: the status page's button, for a server without a browser. */
+function backupCommand(flag: string | null): number {
+  const dataDir = resolveDataDir({ flag, execPath: process.execPath, compiled: isCompiled(), cwd: process.cwd(), home: homedir() });
+  if (!existsSync(join(dataDir, DB_FILE_NAME))) {
+    console.error(`No messenger data in ${dataDir}. Use --data <folder> to name the data folder.`);
+    return 1;
+  }
+  const db = openDatabase(dataDir);
+  try {
+    const b = makeBackup(db, dataDir);
+    console.log(`Backup made: ${b.dir} (${b.files} files). The newest 7 in ${backupsDirFor(dataDir)} are kept.`);
+    return 0;
+  } catch (err) {
+    console.error(`Backup failed: ${err instanceof Error ? err.message : err}`);
+    return 1;
+  } finally {
+    db.close();
+  }
+}
+
 async function main(): Promise<number> {
   let args;
   try {
@@ -59,6 +81,7 @@ async function main(): Promise<number> {
     return 0;
   }
   if (args.checkTunnelBinary) return checkTunnelBinary();
+  if (args.command === "backup") return backupCommand(args.data);
 
   console.log(`Tapalog Messenger ${pkg.version}`);
   const dataDir = resolveDataDir({ flag: args.data, execPath: process.execPath, compiled: isCompiled(), cwd: process.cwd(), home: homedir() });
@@ -126,6 +149,7 @@ async function main(): Promise<number> {
       adminKey,
       db,
       mediaDir: join(dataDir, "media"),
+      backup: { dataDir },
       push: { vapid },
       publicUrl: initialPublicUrl,
       trustCfConnectingIp: tunnelMode !== null,

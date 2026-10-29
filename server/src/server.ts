@@ -12,6 +12,7 @@ import { Hub, type SocketData } from "./hub";
 import { createInvite } from "./store/accounts";
 import { collectGarbage } from "./store/media";
 import { diskUsage } from "./disk";
+import { backupsDirFor, listBackups, makeBackup } from "./backup";
 import { renderStatusPage, tunnelText, type StatusInfo } from "./statusPage";
 
 /** URL path → file the binary can read (an embedded `$bunfs` path when compiled). */
@@ -26,6 +27,11 @@ export interface ServerOptions {
   db: Database;
   /** Where uploads are stored: messenger-data/media. */
   mediaDir: string;
+  /**
+   * Backups of the data folder: a button on the status page and one a day by
+   * itself, the first an hour after start. Off when absent (tests).
+   */
+  backup?: { dataDir: string; dir?: string; firstAfterMs?: number; everyMs?: number };
   /** Web Push: the server's keys, and for tests a stand-in push service. Off when absent. */
   push?: { vapid: Vapid; allowEndpoint?: (endpoint: string) => boolean; fetch?: typeof fetch };
   /** The HTTPS address the server is reachable at from outside, e.g. https://messenger.tapalog.com. */
@@ -59,6 +65,8 @@ const RESERVED_PREFIXES = ["/api/", "/ws", "/media/", "/healthz", "/status", "/s
 const CLOSE_GRACE_MS = 300;
 
 const GARBAGE_EVERY_MS = 3600 * 1000;
+const FIRST_BACKUP_AFTER_MS = 3600 * 1000;
+const BACKUP_EVERY_MS = 24 * 3600 * 1000;
 
 function serveAsset(assets: AssetMap, pathname: string, acceptsHtml: boolean): Response | null {
   let file = assets[pathname === "/" ? "/index.html" : pathname];
@@ -100,6 +108,29 @@ export function startServer(opts: ServerOptions): ServerHandle {
   sweep();
   const sweepTimer = setInterval(sweep, GARBAGE_EVERY_MS);
 
+  const backupOpts = opts.backup;
+  const backupsDir = backupOpts && (backupOpts.dir ?? backupsDirFor(backupOpts.dataDir));
+  const backupNow = () => makeBackup(opts.db, backupOpts!.dataDir, { backupsDir });
+  const autoBackup = () => {
+    try {
+      console.log(`  Backup made: ${backupNow().dir}`);
+    } catch (err) {
+      console.error(`  Backup failed: ${err instanceof Error ? err.message : err}`);
+    }
+  };
+  let backupInterval: ReturnType<typeof setInterval> | undefined;
+  const firstBackup =
+    backupOpts &&
+    setTimeout(() => {
+      autoBackup();
+      backupInterval = setInterval(autoBackup, backupOpts.everyMs ?? BACKUP_EVERY_MS);
+    }, backupOpts.firstAfterMs ?? FIRST_BACKUP_AFTER_MS);
+  const statusWithExtras = () => ({
+    ...opts.status(),
+    disk: disk(),
+    ...(backupsDir && { backups: { dir: backupsDir, last: listBackups(backupsDir).at(-1) ?? null } }),
+  });
+
   const bunServer = Bun.serve<SocketData>({
     port: opts.port,
     hostname: opts.hostname ?? "127.0.0.1",
@@ -129,20 +160,28 @@ export function startServer(opts: ServerOptions): ServerHandle {
         return text("Expected a WebSocket", 400);
       }
 
-      if (pathname === "/status" || pathname === "/status.json" || pathname === "/shutdown" || pathname === "/admin/invite") {
+      if (pathname === "/status" || pathname === "/status.json" || pathname === "/shutdown" || pathname === "/admin/invite" || pathname === "/admin/backup") {
         if (!keyMatches(opts.adminKey, adminKeyOf(req, url))) return text("Forbidden", 403);
         if (pathname === "/status.json") {
-          const st = opts.status();
+          const st = statusWithExtras();
           return json({ ...st, tunnel: st.tunnel && { ...st.tunnel, text: tunnelText(st.tunnel) } });
         }
         if (pathname === "/status") {
           const nonce = crypto.randomUUID().replaceAll("-", "");
-          return withHeaders(new Response(renderStatusPage({ ...opts.status(), disk: disk() }, nonce), { headers: { "Content-Type": "text/html; charset=utf-8" } }), {
+          return withHeaders(new Response(renderStatusPage(statusWithExtras(), nonce), { headers: { "Content-Type": "text/html; charset=utf-8" } }), {
             "Cache-Control": "no-store",
             "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'`,
           });
         }
         if (req.method !== "POST") return text("Method Not Allowed", 405);
+        if (pathname === "/admin/backup") {
+          if (!backupOpts) return text("Not Found", 404);
+          try {
+            return json(backupNow(), 201);
+          } catch (err) {
+            return json({ error: err instanceof Error ? err.message : String(err) }, 500);
+          }
+        }
         if (pathname === "/admin/invite") {
           // The host's own invite link, from the status page: one person, valid for a week.
           const row = createInvite(opts.db, { createdBy: null, grantsAdmin: false, maxUses: 1, expiresAt: now() + 7 * 24 * 3600 * 1000, now: now() });
@@ -186,6 +225,8 @@ export function startServer(opts: ServerOptions): ServerHandle {
       if (stopped) return;
       stopped = true;
       clearInterval(sweepTimer);
+      clearTimeout(firstBackup);
+      clearInterval(backupInterval);
       hub.closeAll();
       await Bun.sleep(CLOSE_GRACE_MS);
       await bunServer.stop(true);

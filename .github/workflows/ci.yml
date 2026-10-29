@@ -144,13 +144,26 @@ jobs:
           curl -fsS -b cookies.txt -o download.bin "http://localhost:18443/media/$MEDIA"
           cmp upload.bin download.bin
 
+          # The status page's backup button: a whole copy beside the data folder, the upload in it.
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:18443/admin/backup)" = 403
+          curl -fsS -X POST -H "X-Admin-Key: $KEY" http://localhost:18443/admin/backup | grep -q '"dir"'
+          ls messenger-backups/*/
+          test -f messenger-backups/*/messenger.db
+          test -f messenger-backups/*/vapid.json
+          test ! -e messenger-backups/*/admin.key
+          cmp upload.bin "$(find messenger-backups -path '*/media/*' -type f | head -n 1)"
+
           # Admin routes are closed without the key and stop the server with it.
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:18443/shutdown)" = 403
           curl -fsS -X POST -H "X-Admin-Key: $KEY" http://localhost:18443/shutdown
+          stopped=false
           for i in $(seq 1 10); do
-            if ! curl -fsS http://localhost:18443/healthz >/dev/null 2>&1; then echo "Stopped cleanly."; exit 0; fi
+            if ! curl -fsS http://localhost:18443/healthz >/dev/null 2>&1; then stopped=true; break; fi
             sleep 1
           done
-          echo "::error::server still answering after /shutdown"
-          kill "$PID" 2>/dev/null
-          exit 1
+          if [ "$stopped" != true ]; then echo "::error::server still answering after /shutdown"; kill "$PID" 2>/dev/null; exit 1; fi
+          echo "Stopped cleanly."
+
+          # The backup command, for servers without a browser: a second copy.
+          "./${{ matrix.binary }}" backup
+          test "$(ls messenger-backups | wc -l)" -eq 2

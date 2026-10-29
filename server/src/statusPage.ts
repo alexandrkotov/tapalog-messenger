@@ -1,5 +1,6 @@
 import type { DiskUsageDto } from "@tapalog-messenger/shared";
 import qrcode from "qrcode-generator";
+import type { BackupInfo } from "./backup";
 import type { TunnelState } from "./tunnel";
 
 export interface StatusInfo {
@@ -18,6 +19,13 @@ export interface StatusInfo {
   startedAt: string;
   /** Filled in by the server when the page is shown. */
   disk?: DiskUsageDto;
+  /** Where backups go and the newest one; absent when backups are off. */
+  backups?: { dir: string; last: BackupInfo | null };
+}
+
+function backupText(b: NonNullable<StatusInfo["backups"]>): string {
+  if (!b.last) return "None yet. One is made an hour after start, then every day; the newest 7 are kept.";
+  return `${new Date(b.last.at).toLocaleString("en-GB")} · ${formatBytes(b.last.bytes)}, ${b.last.files} files`;
 }
 
 /** 1536 → "1.5 KB". */
@@ -71,6 +79,12 @@ export function renderStatusPage(info: StatusInfo, nonce: string): string {
     ["Address on this computer", link(info.localUrl)],
     ["Data folder", `<code>${escapeHtml(info.dataDir)}</code>`],
     ...(info.disk ? ([["Space used", escapeHtml(diskText(info.disk))]] as [string, string][]) : []),
+    ...(info.backups
+      ? ([
+          ["Backups", `<code>${escapeHtml(info.backups.dir)}</code>`],
+          ["Last backup", `<span id="backup-last">${escapeHtml(backupText(info.backups))}</span>`],
+        ] as [string, string][])
+      : []),
     ["Version", `${escapeHtml(info.version)} · schema ${info.schema}`],
     ["Running since", escapeHtml(info.startedAt)],
   ];
@@ -96,6 +110,7 @@ export function renderStatusPage(info: StatusInfo, nonce: string): string {
   .qr { width: 200px; height: 200px; background: #fff; border-radius: 8px; margin: 0 0 24px; }
   .qr svg { width: 100%; height: 100%; display: block; }
   .warn { color: #a15c07; font-weight: 600; }
+  .hint { color: var(--muted); font-size: 14px; }
   .actions { display: flex; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
   .out { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-wrap: anywhere; }
   button { font: inherit; padding: 10px 20px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
@@ -109,8 +124,9 @@ export function renderStatusPage(info: StatusInfo, nonce: string): string {
   ${info.addressChangedFrom ? `<p class="warn">The address changed from ${escapeHtml(info.addressChangedFrom)}. Everyone has to open the new address and install the app and notifications again.</p>` : ""}
   <dl>${rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("")}</dl>
   ${info.publicUrl && (!info.tunnel || info.tunnel.state === "connected") ? `<div class="qr" title="${escapeHtml(info.publicUrl)}">${qrSvg(info.publicUrl)}</div>` : ""}
-  <p class="actions"><button id="invite" type="button">Create an invite link</button> <button id="stop" type="button">Stop server</button></p>
+  <p class="actions"><button id="invite" type="button">Create an invite link</button>${info.backups ? ' <button id="backup" type="button">Back up now</button>' : ""} <button id="stop" type="button">Stop server</button></p>
   <p id="invite-out" class="out" hidden></p>
+  ${info.backups ? '<p class="hint">A backup holds every message and the tunnel token: keep it as private as the data folder. To restore, see the README.</p>' : ""}
 </main>
 <script nonce="${nonce}">
   const key = new URLSearchParams(location.search).get("key") ?? "";
@@ -130,6 +146,16 @@ export function renderStatusPage(info: StatusInfo, nonce: string): string {
     const res = await fetch("/admin/invite", { method: "POST", headers: { "X-Admin-Key": key } }).catch(() => null);
     out.hidden = false;
     out.textContent = res && res.ok ? "Send this link to one person (valid for 7 days): " + (await res.json()).url : "Could not create an invite.";
+  });
+  document.getElementById("backup")?.addEventListener("click", async (event) => {
+    const out = document.getElementById("invite-out");
+    event.target.disabled = true;
+    out.hidden = false;
+    out.textContent = "Backing up…";
+    const res = await fetch("/admin/backup", { method: "POST", headers: { "X-Admin-Key": key } }).catch(() => null);
+    const body = res ? await res.json().catch(() => null) : null;
+    out.textContent = res && res.ok ? "Backup made: " + body.dir : "Backup failed" + (body && body.error ? ": " + body.error : ".");
+    event.target.disabled = false;
   });
   document.getElementById("stop").addEventListener("click", async (event) => {
     event.target.disabled = true;

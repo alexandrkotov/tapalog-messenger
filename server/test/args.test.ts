@@ -4,6 +4,7 @@ import { ArgsError, DEFAULT_PORT, parseArgs } from "../src/args";
 describe("parseArgs", () => {
   it("uses defaults with no flags", () => {
     expect(parseArgs([])).toEqual({
+      command: "serve",
       port: DEFAULT_PORT,
       data: null,
       open: true,
@@ -23,6 +24,7 @@ describe("parseArgs", () => {
     expect(
       parseArgs(["--port", "9000", "--data", "/srv/m", "--no-open", "--public-url", "https://m.example.com/x", "--invite", "--version"]),
     ).toEqual({
+      command: "serve",
       port: 9000,
       data: "/srv/m",
       open: false,
@@ -36,6 +38,13 @@ describe("parseArgs", () => {
       version: true,
       help: false,
     });
+  });
+
+  it("reads the backup command, with a data folder and nothing else", () => {
+    expect(parseArgs(["backup"])).toMatchObject({ command: "backup", data: null });
+    expect(parseArgs(["backup", "--data", "/srv/m"])).toMatchObject({ command: "backup", data: "/srv/m" });
+    expect(() => parseArgs(["--data", "/srv/m", "backup"])).toThrow(ArgsError);
+    expect(() => parseArgs(["backup", "--port", "9000"])).toThrow(ArgsError);
   });
 
   it("rejects a bad port, a missing value and unknown flags", () => {

@@ -2,6 +2,8 @@ import { parseTunnelToken } from "./tunnel";
 
 /** Command-line options. Kept to plain flags so a non-technical host can double-click the binary and get sensible defaults. */
 export interface Args {
+  /** `backup`: make a backup of the data folder and exit, instead of serving. */
+  command: "serve" | "backup";
   port: number;
   /** Explicit data folder from --data; null means "pick one" (see dataDir.ts). */
   data: string | null;
@@ -28,6 +30,9 @@ export interface Args {
 export const DEFAULT_PORT = 8443;
 
 export const USAGE = `Usage: tapalog-messenger [options]
+       tapalog-messenger backup [--data <dir>]
+                 Back up the data folder into messenger-backups/ beside it and exit
+                 (works while the server runs)
 
   --port <n>     Port to listen on, on 127.0.0.1 (default ${DEFAULT_PORT})
   --data <dir>   Data folder (default: messenger-data/ next to the binary)
@@ -61,6 +66,7 @@ export function parsePublicUrl(raw: string): string {
 
 export function parseArgs(argv: string[]): Args {
   const args: Args = {
+    command: "serve",
     port: DEFAULT_PORT,
     data: null,
     open: true,
@@ -82,6 +88,10 @@ export function parseArgs(argv: string[]): Args {
       return next;
     };
     switch (arg) {
+      case "backup":
+        if (i !== 0) throw new ArgsError("backup must come first: tapalog-messenger backup [--data <dir>]");
+        args.command = "backup";
+        break;
       case "--port": {
         const port = Number(value());
         if (!Number.isInteger(port) || port < 1 || port > 65535) throw new ArgsError("--port must be a number from 1 to 65535");
@@ -128,6 +138,9 @@ export function parseArgs(argv: string[]): Args {
       default:
         throw new ArgsError(`Unknown option: ${arg}`);
     }
+  }
+  if (args.command === "backup" && argv.some((a) => a.startsWith("--") && a !== "--data")) {
+    throw new ArgsError("backup takes only --data <dir>");
   }
   if ([args.tunnelToken !== null, args.quickTunnel, args.noTunnel, args.forgetTunnel].filter(Boolean).length > 1) {
     throw new ArgsError("Use only one of --tunnel-token, --quick-tunnel, --no-tunnel, --forget-tunnel");
