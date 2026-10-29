@@ -173,6 +173,72 @@ in front for HTTPS, and the messenger as a systemd service. Shown for Ubuntu
    Settings → Calls → **Check the connection for calls** then shows whether
    the relay can be reached from the network a phone is on, by UDP or TCP.
 
+6. **The relay over TLS**, optional: for networks that let through only
+   encrypted connections. coturn uses Caddy's certificate for the same name.
+   `/usr/local/sbin/tapalog-turn-cert` (then `sudo chmod 700` it) copies it
+   and restarts coturn when it has changed:
+
+   ```sh
+   #!/bin/sh
+   set -eu
+   name=messenger.example.com
+   src=$(ls -td /var/lib/caddy/.local/share/caddy/certificates/*/"$name" 2>/dev/null | head -n 1)
+   [ -n "$src" ] || { echo "Caddy has no certificate for $name" >&2; exit 1; }
+   install -d -m 750 -g turnserver /etc/coturn/tls
+   if ! cmp -s "$src/$name.crt" /etc/coturn/tls/cert.pem; then
+     install -m 640 -g turnserver "$src/$name.crt" /etc/coturn/tls/cert.pem
+     install -m 640 -g turnserver "$src/$name.key" /etc/coturn/tls/key.pem
+     systemctl restart coturn
+     echo "coturn now uses the certificate from $src"
+   fi
+   ```
+
+   In `/etc/turnserver.conf`, replace `no-tls` with:
+
+   ```
+   tls-listening-port=5349
+   cert=/etc/coturn/tls/cert.pem
+   pkey=/etc/coturn/tls/key.pem
+   no-tlsv1
+   no-tlsv1_1
+   ```
+
+   Caddy renews the certificate about a month before it runs out, so a daily
+   timer is enough. `/etc/systemd/system/tapalog-turn-cert.service`:
+
+   ```
+   [Unit]
+   Description=Caddy's certificate for coturn
+
+   [Service]
+   Type=oneshot
+   ExecStart=/usr/local/sbin/tapalog-turn-cert
+   ```
+
+   `/etc/systemd/system/tapalog-turn-cert.timer`:
+
+   ```
+   [Unit]
+   Description=Daily check of the certificate for coturn
+
+   [Timer]
+   OnCalendar=*-*-* 04:30:00
+   Persistent=true
+
+   [Install]
+   WantedBy=timers.target
+   ```
+
+   ```sh
+   sudo systemctl daemon-reload && sudo systemctl start tapalog-turn-cert && sudo systemctl enable --now tapalog-turn-cert.timer
+   sudo systemctl restart coturn && sudo ufw allow 5349/tcp
+   sudo tapalog-messenger service install --public-url https://messenger.example.com \
+     --turn-url turn:messenger.example.com:3478 --turn-url "turn:messenger.example.com:3478?transport=tcp" \
+     --turn-url "turns:messenger.example.com:5349?transport=tcp" --turn-secret-file /etc/tapalog-turn-secret
+   ```
+
+   The connection check then offers TLS too.
+
 `--behind-proxy` takes each person's address from Caddy's `X-Forwarded-For`
 (only on connections from the server itself), so the sign-in limits count per
 person and not for everyone at once. It also refuses the status page and the
