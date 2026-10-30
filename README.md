@@ -48,7 +48,7 @@ The files are not code-signed:
   "Tapalog Messenger" to the apps menu and keeps its data in
   `~/.tapalog-messenger`.
 
-A release is made by pushing a tag: `git tag v0.4.0 && git push --tags`. The
+A release is made by pushing a tag: `git tag v0.5.0 && git push --tags`. The
 version in the tag goes into the binaries.
 
 ## Running
