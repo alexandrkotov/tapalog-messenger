@@ -109,7 +109,7 @@ jobs:
   smoke-macos:
     name: Run the macOS download (Apple Silicon)
     needs: build
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/download-artifact@v8
         with:
