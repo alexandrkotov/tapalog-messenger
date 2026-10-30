@@ -82,6 +82,11 @@ export function CallScreen() {
       <p class="call-status" role="status" data-testid="call-status" data-reason={c.ended ?? ""}>
         {status}
       </p>
+      {c.mediaError && (
+        <p class="call-media-error" data-testid="call-media-error">
+          {c.mediaError}
+        </p>
+      )}
       {details && c.stats && talking && <Details c={c} />}
       {c.stuck && talking && (
         <button type="button" class="call-again" data-testid="call-again" onClick={reconnect}>

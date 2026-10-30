@@ -170,6 +170,25 @@ test.describe("calls", () => {
     await bob.context.close();
   });
 
+  test("when the browser gives no microphone, the screen says why and stays until closed", async ({ browser }) => {
+    const { alice, bob } = await pair(browser);
+    // As a phone whose browser was never allowed the microphone.
+    await bob.page.evaluate(() => {
+      navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("Permission denied", "NotAllowedError"));
+    });
+    await alice.page.getByTestId("call-audio").click();
+    await answer(bob, false);
+    await expect(bob.page.getByTestId("call-status")).toHaveAttribute("data-reason", "no_media");
+    await expect(bob.page.getByTestId("call-media-error")).toHaveText("NotAllowedError: Permission denied");
+    await expect(alice.page.getByTestId("call-status")).toHaveText("Declined");
+    await bob.page.waitForTimeout(3000);
+    await expect(bob.page.getByTestId("call-media-error")).toBeVisible();
+    await bob.page.getByRole("button", { name: "Close" }).click();
+    await expect(screen(bob.page)).toBeHidden();
+    await alice.context.close();
+    await bob.context.close();
+  });
+
   test("Bob's other device stops ringing when he answers on one", async ({ browser }) => {
     test.setTimeout(60_000);
     const { alice, bob, chat } = await pair(browser);

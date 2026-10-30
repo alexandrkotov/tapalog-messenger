@@ -52,8 +52,9 @@ export interface CallInfo {
   stats: CallStats | null;
   /** Shown over the chats, as a bar. */
   minimized: boolean;
-  /** Why it ended, shown for a moment. */
+  /** Why it ended, shown for a moment (no microphone: until closed, with the browser's reason). */
   ended: CallEndReason | "no_media" | null;
+  mediaError: string | null;
 }
 
 /** How this device connects calls: "auto" tries direct first; "relay" always goes through the server over TLS. */
@@ -397,17 +398,23 @@ document.addEventListener("visibilitychange", () => calls.current && calls.curre
 
 // ---- Media -----------------------------------------------------------------
 
-async function openMedia(video: boolean, facing: "user" | "environment"): Promise<{ stream: MediaStream; cameraOff: boolean } | null> {
+/** The browser's own words for why it gave no microphone: what to look up when a phone refuses. */
+const why = (err: unknown) => (err instanceof Error ? `${err.name}: ${err.message}`.slice(0, 200) : String(err));
+
+async function openMedia(video: boolean, facing: "user" | "environment"): Promise<{ stream: MediaStream; cameraOff: boolean } | { error: string }> {
   const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
   const camera = { facingMode: facing, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 } };
   try {
     return { stream: await navigator.mediaDevices.getUserMedia({ audio, video: video && camera }), cameraOff: false };
-  } catch {
-    if (!video) return null;
+  } catch (err) {
+    if (!video) return { error: why(err) };
   }
   // No camera, or it is busy: a video call still works with voice only from this side.
-  const stream = await navigator.mediaDevices.getUserMedia({ audio }).catch(() => null);
-  return stream && { stream, cameraOff: true };
+  try {
+    return { stream: await navigator.mediaDevices.getUserMedia({ audio }), cameraOff: true };
+  } catch (err) {
+    return { error: why(err) };
+  }
 }
 
 // ---- Actions ---------------------------------------------------------------
@@ -433,6 +440,7 @@ function blank(id: string, chat: number, peer: number, video: boolean, outgoing:
     stats: null,
     minimized: false,
     ended: null,
+    mediaError: null,
   };
 }
 
@@ -455,8 +463,8 @@ export async function startCall(chat: number, peer: number, video: boolean) {
   changed();
   // The microphone (and camera) first: the browser asks for them before anything rings.
   const media = await openMedia(video, c.facing);
-  if (over(c)) return media?.stream.getTracks().forEach((t) => t.stop());
-  if (!media) return finish(c, "no_media");
+  if (over(c)) return "stream" in media && media.stream.getTracks().forEach((t) => t.stop());
+  if ("error" in media) return finish(c, "no_media", media.error);
   c.local = media.stream;
   c.cameraOff = media.cameraOff;
   if (!sendCallFrame({ t: "call.invite", call: c.id, chat, video })) return finish(c, "failed");
@@ -473,10 +481,10 @@ export async function answer() {
   c.phase = "connecting";
   changed();
   const media = await openMedia(c.video, c.facing);
-  if (over(c)) return media?.stream.getTracks().forEach((t) => t.stop());
-  if (!media) {
+  if (over(c)) return "stream" in media && media.stream.getTracks().forEach((t) => t.stop());
+  if ("error" in media) {
     sendCallFrame({ t: "call.reject", call: c.id });
-    return finish(c, "no_media");
+    return finish(c, "no_media", media.error);
   }
   c.local = media.stream;
   c.cameraOff = media.cameraOff;
@@ -552,7 +560,7 @@ export function setMinimized(minimized: boolean) {
 }
 
 /** Stops everything this call holds and shows how it ended for a moment. */
-function finish(c: CallInfo, reason: CallInfo["ended"]) {
+function finish(c: CallInfo, reason: CallInfo["ended"], mediaError: string | null = null) {
   if (calls.current !== c || c.phase === "ended") return;
   tone(null);
   void keepAwake(false);
@@ -562,9 +570,11 @@ function finish(c: CallInfo, reason: CallInfo["ended"]) {
   c.local?.getTracks().forEach((t) => t.stop());
   c.phase = "ended";
   c.ended = reason;
+  c.mediaError = mediaError;
   c.minimized = false;
   changed();
-  timers.ended = window.setTimeout(() => close(c), ENDED_SHOWN_MS);
+  // What to fix in the browser's settings stays until it has been read.
+  if (reason !== "no_media") timers.ended = window.setTimeout(() => close(c), ENDED_SHOWN_MS);
 }
 
 function close(c: CallInfo) {
