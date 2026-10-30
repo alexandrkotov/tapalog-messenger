@@ -1,5 +1,5 @@
 import { expect, test, type Browser, type Page, type TestInfo } from "@playwright/test";
-import { openChat, signUp, startChat } from "./people";
+import { openChat, send, signUp, startChat } from "./people";
 import { OwnServer } from "./server";
 
 test("a profile photo is cut where the person moves it, shows up for the other person, and can be removed", async ({ browser }) => {
@@ -102,6 +102,27 @@ test("a blocked person is signed out at once and cannot sign in until unblocked"
     await expect(bobRow).not.toContainText("blocked");
     await bob.page.getByRole("button", { name: "Sign in" }).click();
     await expect(bob.page.getByRole("heading", { name: "Chats" })).toBeVisible();
+  } finally {
+    server.kill();
+  }
+});
+
+test("a deleted account's messages stay, signed as from a deleted account, and nothing more can be sent there", async ({ browser }, info) => {
+  const { server, admin, bob, bobRow } = await serverWithAdmin(browser, info);
+  try {
+    const chatId = await startChat(bob, admin);
+    await send(bob, "hello from bob");
+    admin.page.once("dialog", (d) => void d.accept());
+    await bobRow.getByTestId("delete-user").click();
+    await expect(bobRow).toHaveCount(0);
+    await expect(bob.page.getByRole("button", { name: "Sign in" })).toBeVisible();
+
+    await admin.page.goto("/");
+    await openChat(admin, chatId);
+    await expect(admin.page.getByTestId("chat-title")).toContainText("Deleted account");
+    await expect(admin.page.getByTestId("message").filter({ hasText: "hello from bob" })).toBeVisible();
+    await expect(admin.page.getByTestId("peer-deleted")).toBeVisible();
+    await expect(admin.page.locator(".composer")).toHaveCount(0);
   } finally {
     server.kill();
   }

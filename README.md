@@ -4,16 +4,16 @@ A self-hosted web messenger whose whole server is one executable file.
 Run it from any folder with nothing else installed; the PWA client is built in,
 and all state lives in a `messenger-data/` folder next to the binary.
 
-Status: Stage 3 — search, profiles, administration, backups, releases.
-Sign-up by invite link, direct chats and groups, replies, edits, deletes,
-reactions, sent / delivered / read ticks, typing and online status, several
-devices per account, catch-up after a lost connection. Photos, files (up to
-50 MB) and voice messages; recent chats and an outbox that work without a
-network; push notifications while the app is closed (on iPhone and iPad only
-from the Home Screen app). Search by any part of a word across all chats or in
-one; profile and group photos; a light or dark theme. Administrators block
-people, make password-reset links and see the disk space used. Backups every
-day and on demand.
+Status: Stage 4 — a server in the internet: a VPS behind Caddy, a relay for
+calls, nightly encrypted copies off the server. Sign-up by invite link, direct
+chats and groups, replies, edits, deletes, reactions, sent / delivered / read
+ticks, typing and online status, several devices per account, catch-up after a
+lost connection. Photos, files (up to 50 MB) and voice messages; recent chats
+and an outbox that work without a network; push notifications while the app is
+closed (on iPhone and iPad only from the Home Screen app). Search by any part
+of a word across all chats or in one; profile and group photos; a light or dark
+theme. Administrators block or delete people, make password-reset links and see
+the disk space used. Backups every day and on demand.
 
 - Stack: Bun + TypeScript, `bun build --compile` for Windows, Linux and macOS
 - Storage: SQLite (WAL) via `bun:sqlite`
@@ -47,7 +47,7 @@ The files are not code-signed:
   "Tapalog Messenger" to the apps menu and keeps its data in
   `~/.tapalog-messenger`.
 
-A release is made by pushing a tag: `git tag v0.3.0 && git push --tags`. The
+A release is made by pushing a tag: `git tag v0.4.0 && git push --tags`. The
 version in the tag goes into the binaries.
 
 ## Running
@@ -66,8 +66,10 @@ losing them only means everyone turns notifications on again.
 
 While there are no accounts yet, the status page shows a link for creating the
 first one, which becomes the admin. Administrators manage the server in
-Settings → Server: invite links, blocking and unblocking people, admin rights,
-one-time password-reset links (valid 24 hours), and the disk space used. The
+Settings → Server: invite links, blocking and unblocking people, deleting
+accounts, admin rights, one-time password-reset links (valid 24 hours), and the
+disk space used. A deleted account's messages stay with the people they wrote
+to, signed "Deleted account"; the groups it created are deleted with it. The
 status page can make invite links too.
 
 ### From the internet

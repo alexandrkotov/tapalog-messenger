@@ -63,19 +63,22 @@ export function ChatView({ chatId }: { chatId: number }) {
 
   const messages = st.messages.get(chatId) ?? [];
   const pending = st.outbox.filter((p) => p.chat === chatId);
-  const name = chatName(chat);
+  const name = chatName(chat, s);
   const other = chat.kind === "direct" ? otherMembers(chat)[0] : undefined;
   const typers = typingIn(chatId);
-  const subtitle = typers.length
-    ? chat.kind === "group"
-      ? fmt(s.typingName, { name: chat.members.find((m) => m.id === typers[0])?.display_name ?? "" })
-      : s.typing
-    : other
-      ? other.online
-        ? s.onlineNow
-        : lastSeenText(s, other.last_seen_at, lang)
-      : fmt(s.members, { n: chat.members.length });
+  const subtitle = chat.peer_deleted
+    ? ""
+    : typers.length
+      ? chat.kind === "group"
+        ? fmt(s.typingName, { name: chat.members.find((m) => m.id === typers[0])?.display_name ?? "" })
+        : s.typing
+      : other
+        ? other.online
+          ? s.onlineNow
+          : lastSeenText(s, other.last_seen_at, lang)
+        : fmt(s.members, { n: chat.members.length });
   const byId = (id: number | null) => chat.members.find((m) => m.id === id);
+  const nameOf = (id: number | null | undefined) => (id === null ? s.deletedAccount : byId(id ?? -1)?.display_name);
   const bySeq = (seq: number) => messages.find((m) => m.seq === seq);
   const isAdmin = chat.kind === "group" && byId(myId())?.role === "admin";
   const photos = messages.filter((m) => m.kind === "image" && m.media).map((m) => m.media as MediaDto);
@@ -178,16 +181,22 @@ export function ChatView({ chatId }: { chatId: number }) {
           )
         }
       </MessageList>
-      <Composer
-        key={`${chatId}-${draft.mode}-${"seq" in draft ? draft.seq : ""}`}
-        chatId={chatId}
-        draft={draft}
-        target={"seq" in draft ? bySeq(draft.seq) : undefined}
-        targetName={"seq" in draft ? (byId(bySeq(draft.seq)?.from ?? null)?.display_name ?? "") : ""}
-        onDone={() => setDraft({ mode: "new" })}
-        dropped={dropped}
-        onTakeDropped={() => setDropped([])}
-      />
+      {chat.peer_deleted ? (
+        <p class="hint composer-closed" data-testid="peer-deleted">
+          {s.peerDeleted}
+        </p>
+      ) : (
+        <Composer
+          key={`${chatId}-${draft.mode}-${"seq" in draft ? draft.seq : ""}`}
+          chatId={chatId}
+          draft={draft}
+          target={"seq" in draft ? bySeq(draft.seq) : undefined}
+          targetName={"seq" in draft ? (nameOf(bySeq(draft.seq)?.from) ?? "") : ""}
+          onDone={() => setDraft({ mode: "new" })}
+          dropped={dropped}
+          onTakeDropped={() => setDropped([])}
+        />
+      )}
     </section>
   );
 }
@@ -332,6 +341,7 @@ function MessageList({
   const newer = st.newer.get(chat.id) ?? false;
 
   const byId = (id: number | null) => chat.members.find((m) => m.id === id);
+  const nameOf = (id: number | null) => (id === null ? s.deletedAccount : byId(id)?.display_name);
   const bySeq = (seq: number) => messages.find((m) => m.seq === seq);
 
   return (
@@ -359,10 +369,10 @@ function MessageList({
         return (
           <div key={m.seq} class={`msg-row${mine ? " mine" : ""}${hit === m.seq ? " hit" : ""}`} data-testid="message" data-seq={m.seq} data-hit={hit === m.seq || undefined}>
             <div class={`bubble${m.deleted ? " deleted" : ""}${selected === m.seq ? " selected" : ""}`} onClick={() => onSelect(selected === m.seq ? null : m.seq)}>
-              {chat.kind === "group" && !mine && <span class="sender">{byId(m.from)?.display_name ?? "?"}</span>}
+              {chat.kind === "group" && !mine && <span class="sender">{nameOf(m.from) ?? "?"}</span>}
               {reply && (
                 <span class="quote">
-                  <strong>{byId(reply.from)?.display_name}</strong>
+                  <strong>{nameOf(reply.from)}</strong>
                   {reply.deleted ? s.deleted : quoteText(s, reply)}
                 </span>
               )}

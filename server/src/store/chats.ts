@@ -30,6 +30,8 @@ interface ChatRow {
   id: number;
   kind: "direct" | "group";
   title: string | null;
+  /** NULL for a group, and for a direct chat whose other person deleted their account. */
+  direct_key: string | null;
   avatar_media_id: string | null;
   last_seq: number;
   version: number;
@@ -145,13 +147,14 @@ function chatDto(db: Database, chat: ChatRow, forUserId: number, isOnline: IsOnl
     last_message: lastRow ? withReactions(db, [lastRow])[0]! : null,
     unread,
     muted: mutedUntil != null && mutedUntil > Date.now(),
+    peer_deleted: chat.kind === "direct" && chat.direct_key === null,
   };
 }
 
 /** The chat as `forUserId` sees it, or null if they are not in it. */
 export function getChat(db: Database, chatId: number, forUserId: number, isOnline: IsOnline): ChatDto | null {
   if (!memberRole(db, chatId, forUserId)) return null;
-  const chat = db.query("SELECT id, kind, title, avatar_media_id, last_seq, version FROM chats WHERE id = $chatId").get({ chatId }) as ChatRow | null;
+  const chat = db.query("SELECT id, kind, title, direct_key, avatar_media_id, last_seq, version FROM chats WHERE id = $chatId").get({ chatId }) as ChatRow | null;
   return chat ? chatDto(db, chat, forUserId, isOnline) : null;
 }
 
@@ -159,7 +162,7 @@ export function getChat(db: Database, chatId: number, forUserId: number, isOnlin
 export function chatsOfUser(db: Database, userId: number, isOnline: IsOnline): ChatDto[] {
   const chats = db
     .query(
-      `SELECT c.id, c.kind, c.title, c.avatar_media_id, c.last_seq, c.version FROM chats c JOIN chat_members m ON m.chat_id = c.id
+      `SELECT c.id, c.kind, c.title, c.direct_key, c.avatar_media_id, c.last_seq, c.version FROM chats c JOIN chat_members m ON m.chat_id = c.id
        WHERE m.user_id = $userId
        ORDER BY coalesce((SELECT max(created_at) FROM messages WHERE chat_id = c.id), c.created_at) DESC, c.id DESC`,
     )
@@ -309,6 +312,8 @@ export function sendMessage(
   const kind = m.kind ?? "text";
   return db.transaction(() => {
     if (!memberRole(db, m.chatId, m.sender)) return "forbidden" as const;
+    // Nobody is left to read it.
+    if (db.query("SELECT 1 FROM chats WHERE id = $chatId AND kind = 'direct' AND direct_key IS NULL").get({ chatId: m.chatId })) return "forbidden" as const;
     const existing = db
       .query("SELECT seq, sender_id FROM messages WHERE chat_id = $chatId AND client_id = $clientId")
       .get({ chatId: m.chatId, clientId: m.clientId }) as { seq: number; sender_id: number } | null;

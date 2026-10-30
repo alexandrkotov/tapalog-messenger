@@ -14,7 +14,7 @@ export function ChatList() {
   const [q, setQ] = useState("");
   const query = q.trim().toLowerCase();
   const chats = [...st.chats.values()]
-    .filter((c) => !query || chatName(c).toLowerCase().includes(query) || otherMembers(c).some((m) => m.username.includes(query)))
+    .filter((c) => !query || chatName(c, s).toLowerCase().includes(query) || otherMembers(c).some((m) => m.username.includes(query)))
     .sort((a, b) => chatActivity(b) - chatActivity(a) || b.id - a.id);
 
   return (
@@ -34,13 +34,13 @@ export function ChatList() {
       {chats.length === 0 && !query && <p class="empty">{s.noChats}</p>}
       <ul>
         {chats.map((chat) => {
-          const name = chatName(chat);
+          const name = chatName(chat, s);
           const other = chat.kind === "direct" ? otherMembers(chat)[0] : undefined;
           const typers = typingIn(chat.id);
           const pending = st.outbox.filter((p) => p.chat === chat.id).at(-1);
           const last = chat.last_message;
           const fromMe = pending || (last && last.from === myId());
-          const sender = chat.kind === "group" && last && !fromMe ? chat.members.find((m) => m.id === last.from)?.display_name : undefined;
+          const sender = chat.kind === "group" && last && !fromMe ? (last.from === null ? s.deletedAccount : chat.members.find((m) => m.id === last.from)?.display_name) : undefined;
           const preview = pending
             ? quoteText(s, { kind: pending.kind, body: pending.body, media: pending.file })
             : last
@@ -136,9 +136,9 @@ function FoundMessages({ q }: { q: string }) {
         {hits.map((h) => {
           const chat = st.chats.get(h.chat);
           if (!chat) return null;
-          const name = chatName(chat);
+          const name = chatName(chat, s);
           const other = chat.kind === "direct" ? otherMembers(chat)[0] : undefined;
-          const sender = h.from === myId() ? s.you : chat.kind === "group" ? chat.members.find((m) => m.id === h.from)?.display_name : undefined;
+          const sender = h.from === myId() ? s.you : chat.kind === "group" ? (h.from === null ? s.deletedAccount : chat.members.find((m) => m.id === h.from)?.display_name) : undefined;
           const icon = h.kind === "image" ? "📷 " : h.kind === "voice" ? "🎤 " : h.kind === "file" ? "📄 " : "";
           return (
             <li key={`${h.chat}:${h.seq}`}>

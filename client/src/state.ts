@@ -4,6 +4,7 @@ import { api, ApiError, deviceName } from "./api";
 import { isPhotoType, prepareAvatar, preparePhoto, tooLarge, upload, type Crop, type Outgoing } from "./media";
 import * as offline from "./offline";
 import * as push from "./push";
+import type { Strings } from "./i18n";
 import { navigate } from "./router";
 
 /**
@@ -96,11 +97,13 @@ export function otherMembers(chat: ChatDto): MemberDto[] {
 /** The photo standing for a chat: the group's own, or the other person's (mine in the chat with myself). */
 export function chatPhoto(chat: ChatDto): string | null {
   if (chat.kind === "group") return chat.avatar;
+  if (chat.peer_deleted) return null;
   return otherMembers(chat)[0]?.avatar ?? state.me?.user.avatar ?? null;
 }
 
-export function chatName(chat: ChatDto): string {
+export function chatName(chat: ChatDto, s: Strings): string {
   if (chat.kind === "group") return chat.title ?? "";
+  if (chat.peer_deleted) return s.deletedAccount;
   return otherMembers(chat)[0]?.display_name ?? state.me?.user.display_name ?? "";
 }
 

@@ -113,12 +113,14 @@ export interface AdminUserRow extends UserRow {
   devices: number;
   /** The latest of the last WebSocket close and any device's last request. */
   last_active_at: number | null;
+  groups: number;
 }
 
 export function listUsersForAdmin(db: Database): AdminUserRow[] {
   return db
     .query(
-      `SELECT u.*, count(d.id) AS devices, max(coalesce(u.last_seen_at, 0), coalesce(max(d.last_active_at), 0)) AS last_active_at
+      `SELECT u.*, count(d.id) AS devices, max(coalesce(u.last_seen_at, 0), coalesce(max(d.last_active_at), 0)) AS last_active_at,
+         (SELECT count(*) FROM chats c WHERE c.kind = 'group' AND c.created_by = u.id) AS groups
        FROM users u LEFT JOIN devices d ON d.user_id = u.id
        GROUP BY u.id ORDER BY u.display_name COLLATE NOCASE, u.id`,
     )
@@ -262,8 +264,68 @@ export function createUser(
 ): UserRow {
   return db
     .query(
-      `INSERT INTO users (username, display_name, password_hash, is_admin, created_at)
-       VALUES ($username, $displayName, $passwordHash, $isAdmin, $now) RETURNING *`,
+      // Past every deleted account's id too: devices still hold old messages and reactions by that number.
+      `INSERT INTO users (id, username, display_name, password_hash, is_admin, created_at)
+       VALUES (max(coalesce((SELECT max(id) FROM users), 0), coalesce((SELECT CAST(value AS INTEGER) FROM meta WHERE key = '${LAST_DELETED_KEY}'), 0)) + 1,
+               $username, $displayName, $passwordHash, $isAdmin, $now) RETURNING *`,
     )
     .get({ username: opts.username, displayName: opts.displayName, passwordHash: opts.passwordHash, isAdmin: opts.isAdmin ? 1 : 0, now: opts.now }) as UserRow;
+}
+
+const LAST_DELETED_KEY = "last_deleted_user_id";
+
+/** What deleting an account changed, for telling the people still online. */
+export interface DeletedUser {
+  /** Chats that stay, where the person was a member, wrote or reacted: their members reload them. */
+  changed: number[];
+  /** The person's own groups, deleted with everything in them, and who was in each. */
+  removed: { chat: number; members: number[] }[];
+}
+
+/**
+ * Deletes an account. Their messages stay where they are, shown as from a
+ * deleted account; the groups they created go, with everything in them.
+ * Every chat that stays gets a new version on the messages and reactions
+ * that change, so devices that were away catch up on reconnecting.
+ */
+export function deleteUser(db: Database, userId: number): DeletedUser {
+  return db.transaction(() => {
+    const ids = (sql: string) => (db.query(sql).all({ userId }) as { id: number }[]).map((r) => r.id);
+    const removed = ids("SELECT id FROM chats WHERE kind = 'group' AND created_by = $userId").map((chat) => ({
+      chat,
+      members: (db.query("SELECT user_id FROM chat_members WHERE chat_id = $chat AND user_id != $userId").all({ chat, userId }) as { user_id: number }[]).map((r) => r.user_id),
+    }));
+    for (const { chat } of removed) db.query("DELETE FROM chats WHERE id = $chat").run({ chat });
+    // The chat with oneself has nobody left in it.
+    db.query("DELETE FROM chats WHERE kind = 'direct' AND direct_key = $key").run({ key: `${userId}:${userId}` });
+
+    const changed = ids(
+      `SELECT chat_id AS id FROM chat_members WHERE user_id = $userId
+       UNION SELECT chat_id FROM messages WHERE sender_id = $userId
+       UNION SELECT chat_id FROM reactions WHERE user_id = $userId`,
+    );
+    for (const chat of changed) {
+      const { version } = db.query("UPDATE chats SET version = version + 1 WHERE id = $chat RETURNING version").get({ chat }) as { version: number };
+      db.query(
+        `UPDATE messages SET version = $version WHERE chat_id = $chat
+         AND (sender_id = $userId OR seq IN (SELECT seq FROM reactions WHERE chat_id = $chat AND user_id = $userId))`,
+      ).run({ chat, version, userId });
+    }
+    // Their direct chats stay with the other person, marked as such; nothing new can be sent there.
+    db.query("UPDATE chats SET direct_key = NULL WHERE kind = 'direct' AND id IN (SELECT chat_id FROM chat_members WHERE user_id = $userId)").run({ userId });
+    db.query(
+      `INSERT INTO meta (key, value) VALUES ('${LAST_DELETED_KEY}', CAST($userId AS TEXT))
+       ON CONFLICT (key) DO UPDATE SET value = CAST(max(CAST(value AS INTEGER), $userId) AS TEXT)`,
+    ).run({ userId });
+    // Cascades: devices (and their push subscriptions), memberships, reactions, reset links; messages keep a NULL sender.
+    db.query("DELETE FROM users WHERE id = $userId").run({ userId });
+    // A group whose only administrator this was gets its longest-standing member as one.
+    db.query(
+      `UPDATE chat_members SET role = 'admin' WHERE (chat_id, user_id) IN (
+         SELECT c.id, (SELECT user_id FROM chat_members WHERE chat_id = c.id ORDER BY joined_at, user_id LIMIT 1)
+         FROM chats c WHERE c.kind = 'group' AND EXISTS (SELECT 1 FROM chat_members WHERE chat_id = c.id)
+         AND NOT EXISTS (SELECT 1 FROM chat_members WHERE chat_id = c.id AND role = 'admin'))`,
+    ).run();
+    return { changed: changed.filter((chat) => db.query("SELECT 1 FROM chats WHERE id = $chat").get({ chat })), removed };
+  })();
 }

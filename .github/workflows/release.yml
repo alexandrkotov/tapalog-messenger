@@ -1,7 +1,7 @@
 name: Release
 
-# A tag like v0.3.0 builds every download and publishes a GitHub Release:
-#   git tag v0.3.0 && git push --tags
+# A tag like v0.4.0 builds every download and publishes a GitHub Release:
+#   git tag v0.4.0 && git push --tags
 # The version in the tag goes into the binaries (--version, /healthz, the
 # status page), whatever package.json says.
 on:

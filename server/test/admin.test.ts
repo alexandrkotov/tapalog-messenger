@@ -30,6 +30,7 @@ describe("the Server section", () => {
       created_at: expect.any(Number),
       last_active_at: expect.any(Number),
       devices: 2,
+      groups: 0,
     });
     const disk = (await admin.call("GET", "/api/admin/disk")).data;
     expect(disk).toMatchObject({ db_bytes: expect.any(Number), media_bytes: 0, media_files: 0 });
@@ -71,6 +72,77 @@ describe("the Server section", () => {
     } finally {
       await own.server.stop();
     }
+  });
+});
+
+describe("deleting an account", () => {
+  const say = (chat: number, body: string) => ({ t: "msg.send", chat, client_id: crypto.randomUUID(), kind: "text", body });
+
+  it("keeps their messages as from a deleted account, deletes their groups, and never gives their number out again", async () => {
+    const own = testServer();
+    try {
+      const make = (name: string, admin = false) => new Client(own.base).register(own.invite(admin), name);
+      const admin = await make("boss", true);
+      const alice = await make("alice");
+      const bob = await make("bob");
+      const direct = (await alice.call("POST", "/api/chats", { kind: "direct", user: bob.id })).data.id;
+      const aliceGroup = (await alice.call("POST", "/api/chats", { kind: "group", title: "Family", members: [bob.id] })).data.id;
+      const bobGroup = (await bob.call("POST", "/api/chats", { kind: "group", title: "Bob's", members: [alice.id] })).data.id;
+      expect((await admin.call("GET", "/api/admin/users")).data.find((u: { id: number }) => u.id === bob.id).groups).toBe(1);
+
+      const bobWs = await bob.connect();
+      bobWs.send({ t: "hello", sync: {} });
+      bobWs.send(say(direct, "hi alice"));
+      bobWs.send(say(aliceGroup, "hi all"));
+      await bobWs.next("msg.ack");
+      await bobWs.next("msg.ack");
+      const aliceWs = await alice.connect();
+      aliceWs.send({ t: "hello", sync: {} });
+      await aliceWs.next("synced");
+      const before = (await alice.call("GET", `/api/chats/${direct}`)).data.version;
+
+      expect((await admin.call("DELETE", `/api/admin/users/${admin.id}`)).status).toBe(403);
+      expect((await admin.call("DELETE", `/api/admin/users/${bob.id}`)).data).toEqual({ ok: true });
+      await Bun.sleep(50);
+      expect(bobWs.closed?.code).toBe(4001);
+      expect((await bob.call("GET", "/api/me")).status).toBe(401);
+      expect((await new Client(own.base).call("POST", "/api/auth/login", { username: "bob", password: "password123", device_name: "x" })).status).toBe(401);
+
+      await aliceWs.next("chat.removed", (f) => f.chat === bobGroup);
+      await aliceWs.next("chat.reset", (f) => f.chat === direct);
+      const chat = (await aliceWs.next("chat.update", (f) => f.chat.id === direct)).chat;
+      expect(chat).toMatchObject({ peer_deleted: true, members: [{ id: alice.id }] });
+      expect(chat.version).toBeGreaterThan(before);
+      expect((await alice.call("GET", `/api/chats/${bobGroup}`)).status).toBe(404);
+      expect((await alice.call("GET", `/api/chats/${direct}/messages`)).data).toMatchObject([{ from: null, body: "hi alice" }]);
+      expect((await alice.call("GET", `/api/chats/${aliceGroup}/messages`)).data).toMatchObject([{ from: null, body: "hi all" }]);
+      // A device that was away gets the change on reconnecting.
+      const later = await alice.connect();
+      later.send({ t: "hello", sync: { [direct]: before } });
+      expect((await later.next("msg.update")).msg).toMatchObject({ from: null, body: "hi alice" });
+
+      // Nobody is left to read a new message there.
+      aliceWs.send(say(direct, "are you there?"));
+      expect((await aliceWs.next("error")).code).toBe("forbidden");
+      expect((await admin.call("GET", "/api/admin/users")).data.map((u: { username: string }) => u.username).sort()).toEqual(["alice", "boss"]);
+
+      // A newcomer gets a new number, not the deleted one, and a fresh chat.
+      const carol = await make("carol");
+      expect(carol.id).toBeGreaterThan(bob.id);
+      const fresh = (await alice.call("POST", "/api/chats", { kind: "direct", user: carol.id })).data;
+      expect(fresh.id).not.toBe(direct);
+      expect(fresh.peer_deleted).toBe(false);
+      later.close();
+      aliceWs.close();
+    } finally {
+      await own.server.stop();
+    }
+  });
+
+  it("is for administrators only", async () => {
+    const bob = await newUser("bob");
+    const alice = await newUser("alice");
+    expect((await bob.call("DELETE", `/api/admin/users/${alice.id}`)).status).toBe(403);
   });
 });
 

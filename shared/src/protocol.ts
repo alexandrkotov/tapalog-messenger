@@ -90,7 +90,7 @@ export interface MessageDto {
   chat: number;
   seq: number;
   client_id: string;
-  /** null when the sender's account was deleted. */
+  /** null when the sender's account was deleted (ids of deleted accounts are never given out again). */
   from: number | null;
   kind: MessageKind;
   /** The text, or a photo's caption (may be empty). Empty once deleted. */
@@ -122,6 +122,8 @@ export interface ChatDto {
   unread: number;
   /** Notifications for this chat are off, for the person asking. */
   muted: boolean;
+  /** A direct chat whose other person's account was deleted: its history stays, nothing more can be sent. */
+  peer_deleted: boolean;
 }
 
 export interface MeDto {
@@ -137,6 +139,8 @@ export interface AdminUserDto extends UserDto {
   created_at: number;
   last_active_at: number | null;
   devices: number;
+  /** Groups this person created: deleting the account deletes them too. */
+  groups: number;
 }
 
 /** Where the data folder's space goes. Free and total are for the disk it is on; null where that cannot be read. */

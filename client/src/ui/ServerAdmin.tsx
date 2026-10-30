@@ -41,6 +41,10 @@ export function ServerAdmin() {
       const link = await api<PasswordResetDto>("POST", `/admin/users/${user.id}/reset`);
       setResets({ ...resets, [user.id]: link.url });
     });
+  const remove = (user: AdminUserDto) => {
+    const groups = user.groups > 0 ? `\n\n${fmt(s.confirmDeleteUserGroups, { n: user.groups })}` : "";
+    if (confirm(fmt(s.confirmDeleteUser, { name: user.display_name }) + groups)) void act(user, () => api("DELETE", `/admin/users/${user.id}`));
+  };
   const copy = async (url: string) => {
     await navigator.clipboard?.writeText(url).catch(() => {});
     setCopied(url);
@@ -110,6 +114,11 @@ export function ServerAdmin() {
                   {!u.blocked && u.id !== myId() && (
                     <button type="button" class="link" data-testid="reset-link" onClick={() => void resetLink(u)}>
                       {s.resetLink}
+                    </button>
+                  )}
+                  {u.id !== myId() && (
+                    <button type="button" class="link danger" data-testid="delete-user" onClick={() => remove(u)}>
+                      {s.deleteUser}
                     </button>
                   )}
                 </span>

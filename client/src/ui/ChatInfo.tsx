@@ -28,7 +28,7 @@ export function ChatInfo({ chatId }: { chatId: number }) {
         <Link href={`/chat/${chatId}`} class="icon-button back" aria-label={s.back}>
           ←
         </Link>
-        <h2>{chatName(chat)}</h2>
+        <h2>{chatName(chat, s)}</h2>
       </header>
       <div class="panel-body">
         {isAdmin && (
@@ -39,11 +39,11 @@ export function ChatInfo({ chatId }: { chatId: number }) {
         )}
         <div class="chat-card">
           {isAdmin ? (
-            <AvatarEditor name={chatName(chat)} id={chat.id} photo={chat.avatar} target={{ chat: chatId }} size={64} />
+            <AvatarEditor name={chatName(chat, s)} id={chat.id} photo={chat.avatar} target={{ chat: chatId }} size={64} />
           ) : (
-            <Avatar name={chatName(chat)} id={chat.kind === "direct" ? (chat.members.find((m) => m.id !== myId())?.id ?? chat.id) : chat.id} photo={chatPhoto(chat)} size={64} />
+            <Avatar name={chatName(chat, s)} id={chat.kind === "direct" ? (chat.members.find((m) => m.id !== myId())?.id ?? chat.id) : chat.id} photo={chatPhoto(chat)} size={64} />
           )}
-          <strong>{chatName(chat)}</strong>
+          <strong>{chatName(chat, s)}</strong>
         </div>
 
         <h3>{s.notifications}</h3>
