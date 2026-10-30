@@ -1,6 +1,7 @@
 import type { ChatDto, ClientFrame, ErrorCode, MediaDto, MeDto, MemberDto, MessageDto, MessageKind, ServerFrame } from "@tapalog-messenger/shared";
 import { useEffect, useState } from "preact/hooks";
 import { api, ApiError, deviceName } from "./api";
+import { hangUp, onCallError, onCallFrame, resumeCall } from "./call";
 import { isPhotoType, prepareAvatar, preparePhoto, tooLarge, upload, type Crop, type Outgoing } from "./media";
 import * as offline from "./offline";
 import * as push from "./push";
@@ -297,6 +298,7 @@ function resetState() {
 
 /** Forgets everything about the account on this device, saved copies and cached previews included. */
 function signedOut() {
+  hangUp();
   disconnect();
   clearTimeout(saveTimer);
   state.me = null;
@@ -645,6 +647,8 @@ function send(frame: ClientFrame): boolean {
   return true;
 }
 
+export const sendCallFrame = (frame: Extract<ClientFrame, { t: `call.${string}` }>): boolean => send(frame);
+
 export function connect() {
   if (ws || state.phase !== "ready") return;
   clearTimeout(reconnectTimer);
@@ -720,8 +724,16 @@ function onFrame(f: ServerFrame) {
   switch (f.t) {
     case "synced":
       state.conn = "online";
+      resumeCall();
       void onReconnected();
       break;
+
+    case "call.ring":
+    case "call.accepted":
+    case "call.taken":
+    case "call.ended":
+    case "call.signal":
+      return onCallFrame(f);
 
     case "msg.ack": {
       const i = state.outbox.findIndex((p) => p.client_id === f.client_id);
@@ -791,6 +803,7 @@ function onFrame(f: ServerFrame) {
       break;
 
     case "error":
+      if (f.ref) onCallError(f.ref, f.code);
       if (f.ref) {
         const p = state.outbox.find((x) => x.client_id === f.ref);
         if (p && f.code === "rate_limited")
@@ -821,6 +834,8 @@ function onMessage(msg: MessageDto, isNew: boolean) {
   chat.last_seq = Math.max(chat.last_seq, msg.seq);
   chat.version = Math.max(chat.version, msg.version);
   if (!isNew || msg.from === myId()) return;
+  // A call I answered or turned down is nothing new to read.
+  if (msg.kind === "call" && (msg.call?.outcome === "answered" || msg.call?.outcome === "rejected")) return;
   state.typing.get(msg.chat)?.delete(msg.from ?? 0);
   chat.unread += 1;
   send({ t: "receipt", chat: msg.chat, delivered: msg.seq });

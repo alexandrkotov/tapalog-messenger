@@ -1,6 +1,7 @@
 import { LIMITS, type ChatDto, type MediaDto, type MessageDto, type SearchHit } from "@tapalog-messenger/shared";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError } from "../api";
+import { startCall, useCall } from "../call";
 import { fmt } from "../i18n";
 import { formatDuration, startRecording, type Recording } from "../media";
 import {
@@ -28,7 +29,7 @@ import {
   type Pending,
 } from "../state";
 import { ConnBanner, SEARCH_DELAY_MS } from "./ChatList";
-import { Avatar, clockTime, errorText, lastSeenText, Link, Linkified, quoteText, Ticks, useLang } from "./common";
+import { Avatar, callText, clockTime, errorText, lastSeenText, Link, Linkified, quoteText, Ticks, useLang } from "./common";
 import { AttachmentChip, MessageMedia, PendingMedia, PhotoViewer } from "./Media";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
@@ -38,6 +39,7 @@ type Draft = { mode: "new" } | { mode: "reply"; seq: number } | { mode: "edit"; 
 export function ChatView({ chatId }: { chatId: number }) {
   const { s, lang } = useLang();
   const st = useAppState();
+  const inCall = useCall() !== null;
   const chat = st.chats.get(chatId);
   const [draft, setDraft] = useState<Draft>({ mode: "new" });
   const [selected, setSelected] = useState<number | null>(null);
@@ -83,6 +85,10 @@ export function ChatView({ chatId }: { chatId: number }) {
   const isAdmin = chat.kind === "group" && byId(myId())?.role === "admin";
   const photos = messages.filter((m) => m.kind === "image" && m.media).map((m) => m.media as MediaDto);
   const hasFiles = (e: DragEvent) => [...(e.dataTransfer?.types ?? [])].includes("Files");
+  // Calls are between the two people of a direct chat: not with oneself, not with a deleted account.
+  const callable = other && !chat.peer_deleted ? other : undefined;
+  const call = (video: boolean) => callable && void startCall(chatId, callable.id, video);
+  const canCall = !inCall && st.conn === "online";
 
   return (
     <section
@@ -125,6 +131,16 @@ export function ChatView({ chatId }: { chatId: number }) {
             </small>
           </span>
         </Link>
+        {callable && (
+          <>
+            <button type="button" class="icon-button" aria-label={s.call} title={s.call} disabled={!canCall} data-testid="call-audio" onClick={() => call(false)}>
+              📞
+            </button>
+            <button type="button" class="icon-button" aria-label={s.videoCall} title={s.videoCall} disabled={!canCall} data-testid="call-video" onClick={() => call(true)}>
+              📹
+            </button>
+          </>
+        )}
         <button
           type="button"
           class={`icon-button${searching ? " on" : ""}`}
@@ -157,6 +173,11 @@ export function ChatView({ chatId }: { chatId: number }) {
                   {e}
                 </button>
               ))}
+              {m.kind === "call" && callable && (
+                <button type="button" disabled={!canCall} data-testid="call-back" onClick={() => (call(m.call?.video ?? false), setSelected(null))}>
+                  {s.callBack}
+                </button>
+              )}
               <button type="button" onClick={() => (setDraft({ mode: "reply", seq: m.seq }), setSelected(null))}>
                 {s.reply}
               </button>
@@ -374,6 +395,11 @@ function MessageList({
                 <span class="quote">
                   <strong>{nameOf(reply.from)}</strong>
                   {reply.deleted ? s.deleted : quoteText(s, reply)}
+                </span>
+              )}
+              {!m.deleted && m.kind === "call" && m.call && (
+                <span class={`call-record${!mine && m.call.outcome !== "answered" ? " missed" : ""}`} data-testid="call-record" data-outcome={m.call.outcome}>
+                  {callText(s, m.call, mine)}
                 </span>
               )}
               {!m.deleted && <MessageMedia msg={m} onOpenPhoto={onOpenPhoto} />}

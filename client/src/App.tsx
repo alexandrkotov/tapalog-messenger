@@ -3,6 +3,7 @@ import { resync } from "./push";
 import { match, usePath } from "./router";
 import { boot, useAppState } from "./state";
 import { AlreadySignedIn, Login, Register, ResetPassword } from "./ui/Auth";
+import { CallScreen } from "./ui/Call";
 import { ChatInfo } from "./ui/ChatInfo";
 import { ChatList } from "./ui/ChatList";
 import { ChatView } from "./ui/ChatView";
@@ -77,6 +78,7 @@ export function App() {
           </button>
         </div>
       )}
+      <CallScreen />
       <main class={`layout${main ? " has-main" : ""}`}>
         <ChatList />
         {main ?? <section class="empty-main">{s.pickChat}</section>}

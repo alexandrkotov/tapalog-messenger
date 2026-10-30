@@ -2,8 +2,8 @@ import { createContext, type ComponentChildren } from "preact";
 import { useContext } from "preact/hooks";
 import { fmt, t, type Lang, type Strings } from "../i18n";
 import { navigate } from "../router";
-import { fold, type MessageKind } from "@tapalog-messenger/shared";
-import type { Tick } from "../state";
+import { fold, type CallRecord, type MessageKind } from "@tapalog-messenger/shared";
+import { myId, type Tick } from "../state";
 
 export const LangContext = createContext<{ lang: Lang; s: Strings; setLang: (l: Lang) => void }>({ lang: "en", s: t("en"), setLang: () => {} });
 export const useLang = () => useContext(LangContext);
@@ -95,10 +95,23 @@ export function errorText(s: Strings, code: string): string {
 }
 
 /** One line standing for a message in a quote or the chat list: its text, or what it carries. */
-export function quoteText(s: Strings, m: { kind: MessageKind; body: string; media?: { name: string } | null }): string {
+export function quoteText(s: Strings, m: { kind: MessageKind; body: string; media?: { name: string } | null; from?: number | null; call?: CallRecord }): string {
   if (m.kind === "text") return m.body;
+  if (m.kind === "call") return m.call ? callText(s, m.call, m.from === myId()) : "📞";
   const what = m.kind === "image" ? `📷 ${s.photo}` : m.kind === "voice" ? `🎤 ${s.voiceMessage}` : `📄 ${m.media?.name ?? s.file}`;
   return m.body ? `${what}: ${m.body}` : what;
+}
+
+/** A call's record as the reader sees it: "📞 Outgoing call · 2:31", "📹 Missed call". */
+export function callText(s: Strings, call: CallRecord, mine: boolean): string {
+  const words = {
+    answered: mine ? s.callOut : s.callIn,
+    missed: mine ? s.callNoAnswer : s.callMissed,
+    rejected: mine ? s.callDeclinedByThem : s.callDeclinedByMe,
+    busy: mine ? s.callBusy : s.callMissed,
+  }[call.outcome];
+  const long = call.outcome === "answered" ? ` · ${Math.floor(call.duration / 60)}:${String(call.duration % 60).padStart(2, "0")}` : "";
+  return `${call.video ? "📹" : "📞"} ${words}${long}`;
 }
 
 /** The words a search looks for, folded the way the server folds them. */

@@ -119,7 +119,7 @@ export type PushResult = "sent" | "gone" | "failed";
 export async function sendPush(
   subscription: { endpoint: string; p256dh: string; auth: string },
   payload: unknown,
-  opts: { vapid: Vapid; subject: string; now: number; fetch?: typeof fetch },
+  opts: { vapid: Vapid; subject: string; now: number; fetch?: typeof fetch; ttl?: number },
 ): Promise<PushResult> {
   try {
     const body = await encryptPayload(utf8(JSON.stringify(payload)), subscription);
@@ -129,8 +129,8 @@ export async function sendPush(
         Authorization: await vapidAuthorization(subscription.endpoint, opts.vapid, opts.subject, opts.now),
         "Content-Encoding": "aes128gcm",
         "Content-Type": "application/octet-stream",
-        // Keep trying for a day while the phone is off; then it is old news.
-        TTL: String(24 * 3600),
+        // Keep trying for a day while the phone is off; then it is old news (a ringing call sooner).
+        TTL: String(opts.ttl ?? 24 * 3600),
         Urgency: "high",
       },
       body,

@@ -233,3 +233,64 @@ describe("presence, typing and chat changes", () => {
     expect(ws.closed?.code).toBe(4001);
   });
 });
+
+describe("calls", () => {
+  it("Alice calls Bob: it rings, he answers, offers pass between them, and the call lands in the chat", async () => {
+    const [alice, bob] = [await newUser("alice"), await newUser("bob")];
+    const chat = await directChat(alice, bob);
+    const [wa, wb] = [await alice.connect(), await bob.connect()];
+    const call = crypto.randomUUID();
+    wa.send({ t: "call.invite", call, chat, video: false });
+    expect(await wb.next("call.ring")).toEqual({ t: "call.ring", call, chat, from: alice.id, video: false });
+    wb.send({ t: "call.accept", call });
+    await wa.next("call.accepted");
+
+    const offer = { gen: 0, description: { type: "offer" as const, sdp: "v=0" } };
+    wa.send({ t: "call.signal", call, data: offer });
+    expect(await wb.next("call.signal")).toEqual({ t: "call.signal", call, data: offer });
+    wb.send({ t: "call.signal", call, data: { gen: 0, candidate: { candidate: "candidate:1 1 udp 1 10.0.0.1 9 typ host", sdpMid: "0" } } });
+    expect((await wa.next("call.signal")).data).toMatchObject({ candidate: { sdpMid: "0" } });
+
+    wb.send({ t: "call.end", call });
+    for (const ws of [wa, wb]) {
+      expect(await ws.next("call.ended")).toEqual({ t: "call.ended", call, reason: "ended" });
+      expect((await ws.next("msg.new")).msg).toMatchObject({ chat, from: alice.id, kind: "call", call: { outcome: "answered", video: false } });
+    }
+    const page = await bob.call("GET", `/api/chats/${chat}/messages`);
+    expect(page.data.at(-1)).toMatchObject({ kind: "call", body: "", call: { outcome: "answered" } });
+    wa.close();
+    wb.close();
+  });
+
+  it("a tab opened while a call rings (from its notification) rings too, until it is answered", async () => {
+    const [alice, bob] = [await newUser("alice"), await newUser("bob")];
+    const chat = await directChat(alice, bob);
+    const wa = await alice.connect();
+    const call = crypto.randomUUID();
+    wa.send({ t: "call.invite", call, chat, video: true });
+    await Bun.sleep(50);
+    const wb = await bob.connect();
+    expect(await wb.next("call.ring")).toEqual({ t: "call.ring", call, chat, from: alice.id, video: true });
+    wb.send({ t: "call.accept", call });
+    await wa.next("call.accepted");
+    const later = await bob.connect();
+    expect(await later.got("call.ring")).toBe(false);
+    wa.send({ t: "call.end", call });
+    await wb.next("call.ended");
+    for (const ws of [wa, wb, later]) ws.close();
+  });
+
+  it("refuses malformed call frames", async () => {
+    const ws = await (await newUser("alice")).connect();
+    for (const junk of [
+      { t: "call.invite", call: "nope", chat: 1, video: false },
+      { t: "call.signal", call: crypto.randomUUID(), data: { gen: 0, description: { type: "hack", sdp: "x" } } },
+      { t: "call.signal", call: crypto.randomUUID(), data: { candidate: null } },
+      { t: "call.signal", call: crypto.randomUUID(), data: {} },
+    ]) {
+      ws.send(junk);
+      await ws.next("error", (f) => f.code === "bad_request");
+    }
+    ws.close();
+  });
+});

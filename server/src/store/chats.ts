@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { INLINE_IMAGE_TYPES, LIMITS, type ChatDto, type MemberDto, type MessageDto, type MessageKind } from "@tapalog-messenger/shared";
+import { INLINE_IMAGE_TYPES, LIMITS, type CallRecord, type ChatDto, type MemberDto, type MessageDto, type MessageKind } from "@tapalog-messenger/shared";
 import { getMedia, mediaDto, type MediaRow } from "./media";
 
 /**
@@ -69,7 +69,8 @@ function withReactions(db: Database, rows: MessageRow[]): MessageDto[] {
     client_id: r.client_id,
     from: r.sender_id,
     kind: r.kind,
-    body: r.deleted_at === null ? r.body : "",
+    body: r.deleted_at === null && r.kind !== "call" ? r.body : "",
+    ...(r.kind === "call" && r.deleted_at === null && { call: JSON.parse(r.body) as CallRecord }),
     media: r.deleted_at === null && r.media_id !== null && media.has(r.media_id) ? mediaDto(media.get(r.media_id)!) : null,
     reply_to: r.reply_to_seq,
     at: r.created_at,
@@ -343,15 +344,50 @@ export function sendMessage(
   })();
 }
 
+/**
+ * A call's record, from the caller, written once per call (its id is the
+ * client_id). Both have seen an answered call; a missed one is unread for
+ * the person called. Null if this call is already written.
+ */
+export function recordCall(db: Database, c: { chatId: number; callId: string; caller: number; callee: number; record: CallRecord; now: number }): MessageDto | null {
+  return db.transaction(() => {
+    // The chat may be gone, or the other person deleted, while the call rang.
+    if (!callPeers(db, c.chatId)) return null;
+    if (db.query("SELECT 1 FROM messages WHERE chat_id = $chatId AND client_id = $callId").get({ chatId: c.chatId, callId: c.callId })) return null;
+    const { last_seq: seq, version } = db
+      .query("UPDATE chats SET last_seq = last_seq + 1, version = version + 1 WHERE id = $chatId RETURNING last_seq, version")
+      .get({ chatId: c.chatId }) as { last_seq: number; version: number };
+    db.query(
+      `INSERT INTO messages (chat_id, seq, client_id, sender_id, kind, body, created_at, version)
+       VALUES ($chatId, $seq, $callId, $caller, 'call', $body, $now, $version)`,
+    ).run({ chatId: c.chatId, seq, callId: c.callId, caller: c.caller, body: JSON.stringify(c.record), now: c.now, version });
+    // The person called saw a call they answered or turned down; a missed one waits for them as unread.
+    const seen = c.record.outcome === "answered" || c.record.outcome === "rejected" ? [c.caller, c.callee] : [c.caller];
+    for (const user of seen) {
+      db.query("UPDATE chat_members SET delivered_seq = $seq, read_seq = $seq WHERE chat_id = $chatId AND user_id = $user").run({ chatId: c.chatId, seq, user });
+    }
+    return getMessage(db, c.chatId, seq)!;
+  })();
+}
+
+/** The two people of a direct chat that can still take calls: not the chat with oneself, not one whose other person was deleted. */
+export function callPeers(db: Database, chatId: number): [number, number] | null {
+  const chat = db.query("SELECT kind, direct_key FROM chats WHERE id = $chatId").get({ chatId }) as { kind: string; direct_key: string | null } | null;
+  if (chat?.kind !== "direct" || !chat.direct_key) return null;
+  const ids = memberIds(db, chatId);
+  return ids.length === 2 ? [ids[0]!, ids[1]!] : null;
+}
+
 export function editMessage(db: Database, chatId: number, seq: number, userId: number, body: string, now: number): MessageDto | Refusal {
   return db.transaction(() => {
     if (!memberRole(db, chatId, userId)) return "forbidden" as const;
-    const row = db.query("SELECT sender_id, deleted_at FROM messages WHERE chat_id = $chatId AND seq = $seq").get({ chatId, seq }) as {
+    const row = db.query("SELECT sender_id, kind, deleted_at FROM messages WHERE chat_id = $chatId AND seq = $seq").get({ chatId, seq }) as {
       sender_id: number;
+      kind: MessageKind;
       deleted_at: number | null;
     } | null;
     if (!row || row.deleted_at !== null) return "not_found" as const;
-    if (row.sender_id !== userId) return "forbidden" as const;
+    if (row.sender_id !== userId || row.kind === "call") return "forbidden" as const;
     const version = bumpVersion(db, chatId);
     db.query("UPDATE messages SET body = $body, edited_at = $now, version = $version WHERE chat_id = $chatId AND seq = $seq").run({
       chatId,

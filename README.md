@@ -4,8 +4,9 @@ A self-hosted web messenger whose whole server is one executable file.
 Run it from any folder with nothing else installed; the PWA client is built in,
 and all state lives in a `messenger-data/` folder next to the binary.
 
-Status: Stage 4 — a server in the internet: a VPS behind Caddy, a relay for
-calls, nightly encrypted copies off the server. Sign-up by invite link, direct
+Status: Stage 5 — voice and video calls between two people, with the call
+written into the chat; a server in the internet (a VPS behind Caddy, a relay for
+calls, nightly encrypted copies off the server). Sign-up by invite link, direct
 chats and groups, replies, edits, deletes, reactions, sent / delivered / read
 ticks, typing and online status, several devices per account, catch-up after a
 lost connection. Photos, files (up to 50 MB) and voice messages; recent chats
@@ -174,6 +175,14 @@ in front for HTTPS, and the messenger as a systemd service. Shown for Ubuntu
 
    Settings → Calls → **Check the connection for calls** then shows whether
    the relay can be reached from the network a phone is on, by UDP or TCP.
+
+   During a call the app watches how much is lost and how long it takes. On a
+   network that loses or holds up too much over UDP for a few seconds, both
+   sides move the call to the relay over TLS (step 6) by themselves, or over
+   TCP if the server has no TLS address. Settings → Calls → **How to connect
+   calls** → *Only through the server (TLS)* does that from the start, for a
+   network where calls break up anyway. Without a relay, calls work only
+   where the two devices can reach each other directly.
 
 6. **The relay over TLS**, optional: for networks that let through only
    encrypted connections. coturn uses Caddy's certificate for the same name.

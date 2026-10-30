@@ -116,7 +116,10 @@ export function startServer(opts: ServerOptions): ServerHandle {
   const push = opts.push
     ? createNotifier({ db: opts.db, ...opts.push, subject: () => publicUrl ?? "https://localhost", isDeviceOnline: hub.isDeviceOnline, now })
     : null;
-  if (push) hub.onNewMessage = (msg) => void push.newMessage(msg);
+  if (push) {
+    hub.onNewMessage = (msg) => void push.newMessage(msg);
+    hub.onRing = (call) => void push.ringing(call);
+  }
   const disk = () => diskUsage(opts.db.filename, opts.mediaDir);
   const handleApi = createApi({ db: opts.db, hub, files, push, origins, inviteBase, disk, turn: opts.turn ?? null, now });
   const sweep = () => {

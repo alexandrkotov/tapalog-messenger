@@ -1,6 +1,7 @@
 import type { TurnDto } from "@tapalog-messenger/shared";
 import { useEffect, useState } from "preact/hooks";
 import { api } from "../api";
+import { callRoute, setCallRoute, type CallRoute } from "../call";
 import { checkRelay, type CallCheckResult, type Transport } from "../callCheck";
 import { fmt } from "../i18n";
 import { useLang } from "./common";
@@ -14,6 +15,7 @@ export function CallCheck() {
   const [transport, setTransport] = useState<Transport>("any");
   const [left, setLeft] = useState<number | null>(null);
   const [result, setResult] = useState<CallCheckResult | null>(null);
+  const [route, setRoute] = useState<CallRoute>(callRoute);
 
   useEffect(() => {
     api<TurnDto>("GET", "/turn").then(
@@ -41,6 +43,22 @@ export function CallCheck() {
   return (
     <>
       <h3>{s.calls}</h3>
+      <label class="stack">
+        {s.callRoute}
+        <select
+          value={route}
+          data-testid="call-route"
+          onChange={(e) => {
+            const r = e.currentTarget.value as CallRoute;
+            setCallRoute(r);
+            setRoute(r);
+          }}
+        >
+          <option value="auto">{s.callRouteAuto}</option>
+          <option value="relay">{s.callRouteServer}</option>
+        </select>
+      </label>
+      <p class="hint">{s.callRouteHint}</p>
       <p class="hint">{fmt(s.callCheckHint, { n: SECONDS })}</p>
       <select aria-label={s.callTransport} value={transport} disabled={left !== null} onChange={(e) => setTransport(e.currentTarget.value as Transport)}>
         <option value="any">{s.transportAny}</option>

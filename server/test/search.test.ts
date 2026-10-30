@@ -141,8 +141,33 @@ describe("migration to schema 4", () => {
     old.run(`INSERT INTO messages (chat_id, seq, client_id, sender_id, kind, body, created_at, deleted_at, version) VALUES
              (1, 1, 'c1', 1, 'text', 'Поедем на дачу?', 10, NULL, 1),
              (1, 2, 'c2', 2, 'text', 'удалённая дача', 11, 20, 2)`);
-    expect(migrate(old)).toBe(4);
+    expect(migrate(old, MIGRATIONS.slice(0, 4))).toBe(4);
     expect((searchMessages(old, 2, "дач", { limit: 10 }) as { seq: number }[]).map((h) => h.seq)).toEqual([1]);
+  });
+});
+
+describe("migration to schema 5", () => {
+  it("keeps the search index pointing at the same messages, and leaves call records out of it", () => {
+    const old = new Database(":memory:", { strict: true });
+    old.run("PRAGMA foreign_keys = ON");
+    migrate(old, MIGRATIONS.slice(0, 4));
+    old.run("INSERT INTO users (id, username, display_name, password_hash, created_at) VALUES (1, 'a', 'A', 'x', 1), (2, 'b', 'B', 'x', 1)");
+    old.run("INSERT INTO chats (id, kind, direct_key, created_at, last_seq, version) VALUES (1, 'direct', '1:2', 1, 3, 3)");
+    old.run("INSERT INTO chat_members (chat_id, user_id, joined_at) VALUES (1, 1, 1), (1, 2, 1)");
+    old.run(`INSERT INTO messages (chat_id, seq, client_id, sender_id, kind, body, created_at, version) VALUES
+             (1, 1, 'c1', 1, 'text', 'первое', 10, 1), (1, 2, 'c2', 1, 'text', 'второе', 11, 2), (1, 3, 'c3', 2, 'text', 'третье про дачу', 12, 3)`);
+    // A gap in the rowids, so a rebuild that numbered them afresh would point the index at the wrong rows.
+    old.run("DELETE FROM messages WHERE seq = 2");
+    expect(migrate(old)).toBe(5);
+    const seqs = (q: string) => (searchMessages(old, 2, q, { limit: 10 }) as { seq: number }[]).map((h) => h.seq);
+    expect(seqs("дач")).toEqual([3]);
+    expect(seqs("перв")).toEqual([1]);
+
+    const record = JSON.stringify({ outcome: "missed", video: false, duration: 0 });
+    old.run(`INSERT INTO messages (chat_id, seq, client_id, sender_id, kind, body, created_at, version) VALUES (1, 4, 'c4', 1, 'call', ?, 13, 4)`, [record]);
+    expect(seqs("missed")).toEqual([]);
+    old.run("UPDATE messages SET body = 'про первую дачу' WHERE seq = 1");
+    expect(seqs("дач")).toEqual([3, 1]);
   });
 });
 

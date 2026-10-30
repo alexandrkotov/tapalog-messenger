@@ -259,7 +259,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bunx playwright install --with-deps chromium
         working-directory: e2e
-      - name: The call check through coturn
+      - name: The call check and a relayed call through coturn
         run: |
           chmod +x "$GITHUB_WORKSPACE/dist/tapalog-messenger-linux-x64"
           npx playwright test tests/calls.spec.ts --project=chromium

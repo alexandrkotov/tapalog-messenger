@@ -193,6 +193,23 @@ describe("notifications", () => {
     expect(await pushesDuring(endpoint, () => say(alice, chat, "loud"))).toHaveLength(1);
   });
 
+  it("rings for a call even in a muted chat, briefly, then tells how the call went", async () => {
+    const { alice, bob, chat, browser, endpoint } = await pair();
+    await bob.call("PATCH", `/api/chats/${chat}`, { muted: true });
+    const ws = await alice.connect();
+    const call = crypto.randomUUID();
+    const [ring] = await pushesDuring(endpoint, async () => ws.send({ t: "call.invite", call, chat, video: true }));
+    expect(ring!.headers.get("ttl")).toBe("45");
+    expect(JSON.parse(decrypt(ring!.body, browser))).toMatchObject({ chat, from: alice.username.toUpperCase(), kind: "call", ringing: { call, video: true } });
+
+    const [record] = await pushesDuring(endpoint, async () => ws.send({ t: "call.end", call }));
+    expect(record!.headers.get("ttl")).toBe("86400");
+    const payload = JSON.parse(decrypt(record!.body, browser)) as PushPayload;
+    expect(payload).toMatchObject({ chat, kind: "call", call: { outcome: "missed", video: true, duration: 0 } });
+    expect(payload.ringing).toBeUndefined();
+    ws.close();
+  });
+
   it("forgets a subscription the push service says is gone", async () => {
     const { alice, chat, endpoint } = await pair();
     service.answer(410);

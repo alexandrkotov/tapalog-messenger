@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { Server, ServerWebSocket } from "bun";
 import { parseClientFrame, type ClientFrame, type MessageDto, type ServerFrame } from "@tapalog-messenger/shared";
+import { Calls } from "./calls";
 import { RateLimiter } from "./http";
 import { setLastSeen } from "./store/accounts";
 import * as chats from "./store/chats";
@@ -34,11 +35,30 @@ export class Hub {
   private sends = new RateLimiter(30, 10_000);
   /** Told about every new message after it went out to open tabs: Web Push for the rest. */
   onNewMessage: ((msg: MessageDto) => void) | null = null;
+  /** Told about every call that starts ringing: Web Push for the devices with no tab open. */
+  onRing: ((call: { id: string; chat: number; from: number; to: number; video: boolean }) => void) | null = null;
+  readonly calls: Calls;
 
   constructor(
     private readonly db: Database,
     private readonly now: () => number = Date.now,
-  ) {}
+  ) {
+    this.calls = new Calls(
+      db,
+      {
+        publish: (userIds, frame) => this.publish(userIds, frame),
+        publishExcept: (userId, except, frame) => {
+          for (const ws of this.sockets.get(userId) ?? []) if (ws !== except) ws.send(JSON.stringify(frame));
+        },
+        newMessage: (msg) => {
+          this.publish(chats.memberIds(this.db, msg.chat), { t: "msg.new", msg });
+          this.onNewMessage?.(msg);
+        },
+        ring: (call) => this.onRing?.(call),
+      },
+      { now },
+    );
+  }
 
   attach(server: Server<SocketData>) {
     this.server = server;
@@ -78,6 +98,7 @@ export class Hub {
 
   /** On shutdown: tell clients to reconnect later rather than treat it as an error. */
   closeAll() {
+    this.calls.clear();
     for (const set of this.sockets.values()) for (const ws of set) ws.close(1001, "server stopping");
   }
 
@@ -90,10 +111,12 @@ export class Hub {
       set.add(ws);
       this.sockets.set(userId, set);
       if (wasOffline) this.publish(chats.contactIds(this.db, userId), { t: "presence", user: userId, online: true, last_seen: null });
+      for (const ring of this.calls.ringingFor(userId)) ws.send(JSON.stringify(ring));
     },
 
     close: (ws: Socket) => {
       const { userId } = ws.data;
+      this.calls.socketClosed(ws);
       const set = this.sockets.get(userId);
       if (!set) return;
       set.delete(ws);
@@ -188,6 +211,14 @@ export class Hub {
           { t: "typing", chat: f.chat, user: userId },
         );
       }
+
+      case "call.invite":
+      case "call.accept":
+      case "call.reject":
+      case "call.end":
+      case "call.signal":
+      case "call.resume":
+        return this.calls.handle(ws, f, send);
     }
   }
 }

@@ -61,11 +61,28 @@ self.addEventListener("fetch", (event) => {
 // the words are made here in the language the person chose. Browsers insist
 // that every push shows a notification. One notification per chat: a newer
 // message replaces the older one instead of piling up.
+//
+// A ringing call has its own notification, which stays until it is tapped or
+// replaced: when the call is over, the push with its record takes its place
+// (loudly for a missed call, quietly otherwise).
 const PUSH_TEXT = {
-  en: { text: "New message", image: "Photo", file: "File", voice: "Voice message" },
-  ru: { text: "Новое сообщение", image: "Фото", file: "Файл", voice: "Голосовое сообщение" },
-  uk: { text: "Нове повідомлення", image: "Фото", file: "Файл", voice: "Голосове повідомлення" },
+  en: { text: "New message", image: "Photo", file: "File", voice: "Voice message", ring: "Incoming call", ringVideo: "Incoming video call", missed: "Missed call", ended: "Call ended" },
+  ru: { text: "Новое сообщение", image: "Фото", file: "Файл", voice: "Голосовое сообщение", ring: "Входящий звонок", ringVideo: "Входящий видеозвонок", missed: "Пропущенный звонок", ended: "Звонок завершён" },
+  uk: { text: "Нове повідомлення", image: "Фото", file: "Файл", voice: "Голосове повідомлення", ring: "Вхідний дзвінок", ringVideo: "Вхідний відеодзвінок", missed: "Пропущений дзвінок", ended: "Дзвінок завершено" },
 };
+
+function callNotification(p, words) {
+  const icon = p.icon || "/icons/icon-192.png";
+  const tag = `call-${p.chat}`;
+  if (p.ringing) {
+    return {
+      title: p.from,
+      options: { body: p.ringing.video ? words.ringVideo : words.ring, tag, renotify: true, requireInteraction: true, vibrate: [400, 200, 400, 200, 400], icon, data: { chat: p.chat } },
+    };
+  }
+  const missed = p.call && (p.call.outcome === "missed" || p.call.outcome === "busy");
+  return { title: p.from, options: { body: missed ? words.missed : words.ended, tag, renotify: missed, silent: !missed, icon, data: { chat: p.chat } } };
+}
 
 self.addEventListener("push", (event) => {
   let p;
@@ -75,6 +92,10 @@ self.addEventListener("push", (event) => {
     return;
   }
   const words = PUSH_TEXT[p.lang] ?? PUSH_TEXT.en;
+  if (p.kind === "call") {
+    const n = callNotification(p, words);
+    return event.waitUntil(self.registration.showNotification(n.title, n.options));
+  }
   const what = words[p.kind] ?? words.text;
   const title = p.chat_title ?? p.from;
   event.waitUntil(

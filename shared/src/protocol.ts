@@ -38,7 +38,21 @@ export const LIMITS = {
 /** Types a browser may show in place. Anything else is served as a download, so an uploaded page or SVG never runs on our address. */
 export const INLINE_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
 
-export type MessageKind = "text" | "image" | "file" | "voice";
+export type MessageKind = "text" | "image" | "file" | "voice" | "call";
+
+/** How a call ended, as its record in the chat says. */
+export type CallOutcome = "answered" | "missed" | "rejected" | "busy";
+
+/** A call's record in the chat: written by the server, from the caller. */
+export interface CallRecord {
+  outcome: CallOutcome;
+  video: boolean;
+  /** Seconds of conversation; 0 unless answered. */
+  duration: number;
+}
+
+/** Why a call is over, as both sides hear it. */
+export type CallEndReason = "ended" | "rejected" | "missed" | "busy" | "cancelled" | "failed";
 
 export const USERNAME_RE = /^[a-z0-9_.]{3,32}$/;
 
@@ -97,6 +111,8 @@ export interface MessageDto {
   body: string;
   /** The photo, file or voice recording; null for text and once deleted. */
   media: MediaDto | null;
+  /** For a call's record: how it went. */
+  call?: CallRecord;
   reply_to: number | null;
   at: number;
   edited_at: number | null;
@@ -214,6 +230,10 @@ export interface PushSubscribeRequest {
 /** What a push carries. No message text: the push services in between see only that something happened. */
 export interface PushPayload {
   chat: number;
+  /** A ringing call: the notification stays until it is answered or the call is over. */
+  ringing?: { call: string; video: boolean };
+  /** For a call's record: how it went (a missed one is worth a notification, the rest only replace the ringing). */
+  call?: CallRecord;
   /** Group title; null for a direct chat, where the sender's name is the title. */
   chat_title: string | null;
   from: string;
@@ -275,7 +295,29 @@ export type ClientFrame =
   | { t: "typing"; chat: number }
   /** An empty emoji removes this user's reaction. */
   | { t: "react"; chat: number; seq: number; emoji: string }
+  /** Calls the other person of a direct chat; `call` is a new UUID the caller makes. */
+  | { t: "call.invite"; call: string; chat: number; video: boolean }
+  | { t: "call.accept"; call: string }
+  | { t: "call.reject"; call: string }
+  /** Hangs up, or cancels while it still rings. */
+  | { t: "call.end"; call: string }
+  /** WebRTC's offers, answers and ICE candidates, passed to the other side as they are. */
+  | { t: "call.signal"; call: string; data: CallSignal }
+  /** After reconnecting in the middle of a call: this tab is still in it. */
+  | { t: "call.resume"; call: string }
   | { t: "ping" };
+
+/**
+ * WebRTC's messages between the two tabs. `gen` counts how many times the
+ * connection was started afresh (`reset`); whatever belongs to an older one
+ * is dropped.
+ */
+export type CallSignal = { gen: number } & (
+  | { description: { type: "offer" | "answer" | "pranswer" | "rollback"; sdp?: string } }
+  | { candidate: { candidate: string; sdpMid?: string | null; sdpMLineIndex?: number | null; usernameFragment?: string | null } | null }
+  /** Start the connection again; with `relay`, only through the server's relay over TCP or TLS (this network loses UDP). */
+  | { reset: { relay: boolean } }
+);
 
 export type ServerFrame =
   | { t: "msg.ack"; client_id: string; chat: number; seq: number; at: number }
@@ -291,6 +333,14 @@ export type ServerFrame =
   | { t: "receipt"; chat: number; user: number; delivered: number; read: number }
   | { t: "presence"; user: number; online: boolean; last_seen: number | null }
   | { t: "typing"; chat: number; user: number }
+  /** Someone calls: every tab of the person called rings. */
+  | { t: "call.ring"; call: string; chat: number; from: number; video: boolean }
+  /** To the caller: the other side picked up, on the device that will talk. */
+  | { t: "call.accepted"; call: string }
+  /** To the other tabs of the person called: answered elsewhere, stop ringing. */
+  | { t: "call.taken"; call: string }
+  | { t: "call.ended"; call: string; reason: CallEndReason }
+  | { t: "call.signal"; call: string; data: CallSignal }
   | { t: "error"; code: ErrorCode; ref?: string }
   | { t: "pong" };
 
@@ -300,9 +350,42 @@ const isId = (v: unknown): v is number => typeof v === "number" && Number.isSafe
 const isSeq = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 const isBody = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0 && v.length <= LIMITS.body;
 const isCaption = (v: unknown): v is string => typeof v === "string" && v.length <= LIMITS.body;
+/** What a client may send; a call's record is written by the server. */
 const KINDS: readonly unknown[] = ["text", "image", "file", "voice"] satisfies MessageKind[];
 export const MEDIA_ID_RE = /^[A-Za-z0-9_-]{22}$/;
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+const isUuid = (v: unknown): v is string => typeof v === "string" && UUID_RE.test(v);
+const optional = (v: unknown, check: (v: unknown) => boolean) => v === undefined || v === null || check(v);
+const DESCRIPTION_TYPES: readonly unknown[] = ["offer", "answer", "pranswer", "rollback"];
+
+/** A WebRTC description or ICE candidate, rebuilt from only the fields WebRTC has. */
+function parseSignal(raw: unknown): CallSignal | null {
+  if (!isObject(raw) || !isSeq(raw.gen)) return null;
+  const gen = raw.gen;
+  if (isObject(raw.description)) {
+    const d = raw.description;
+    if (!DESCRIPTION_TYPES.includes(d.type) || !optional(d.sdp, (v) => typeof v === "string")) return null;
+    return { gen, description: { type: d.type as "offer", ...(typeof d.sdp === "string" && { sdp: d.sdp }) } };
+  }
+  if (isObject(raw.reset)) return typeof raw.reset.relay === "boolean" ? { gen, reset: { relay: raw.reset.relay } } : null;
+  if (raw.candidate === null) return { gen, candidate: null };
+  if (isObject(raw.candidate)) {
+    const c = raw.candidate;
+    if (typeof c.candidate !== "string") return null;
+    if (!optional(c.sdpMid, (v) => typeof v === "string") || !optional(c.sdpMLineIndex, isSeq) || !optional(c.usernameFragment, (v) => typeof v === "string")) return null;
+    return {
+      gen,
+      candidate: {
+        candidate: c.candidate,
+        sdpMid: (c.sdpMid as string | undefined) ?? null,
+        sdpMLineIndex: (c.sdpMLineIndex as number | undefined) ?? null,
+        usernameFragment: (c.usernameFragment as string | undefined) ?? null,
+      },
+    };
+  }
+  return null;
+}
 
 /** The frame if it is well-formed, otherwise null. Unknown extra fields are dropped. */
 export function parseClientFrame(raw: unknown): ClientFrame | null {
@@ -357,6 +440,17 @@ export function parseClientFrame(raw: unknown): ClientFrame | null {
       // Any visible character is fine; letters and digits are not reactions.
       if (f.emoji !== "" && (/[\p{L}\p{N}\s<>]/u.test(f.emoji) || f.emoji.trim() === "")) return null;
       return { t: "react", chat: f.chat, seq: f.seq, emoji: f.emoji };
+    case "call.invite":
+      return isUuid(f.call) && isId(f.chat) && typeof f.video === "boolean" ? { t: "call.invite", call: f.call.toLowerCase(), chat: f.chat, video: f.video } : null;
+    case "call.accept":
+    case "call.reject":
+    case "call.end":
+    case "call.resume":
+      return isUuid(f.call) ? { t: f.t, call: f.call.toLowerCase() } : null;
+    case "call.signal": {
+      const data = parseSignal(f.data);
+      return isUuid(f.call) && data ? { t: "call.signal", call: f.call.toLowerCase(), data } : null;
+    }
     case "ping":
       return { t: "ping" };
     default:
