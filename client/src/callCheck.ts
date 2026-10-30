@@ -65,7 +65,8 @@ export async function checkRelay(turn: TurnDto, transport: Transport, seconds: n
     b.onicecandidate = (e) => e.candidate && void a.addIceCandidate(e.candidate).catch(() => {});
     // Unordered and never resent, like call audio: a lost packet stays lost.
     const channel = a.createDataChannel("check", { ordered: false, maxRetransmits: 0 });
-    b.ondatachannel = (e) => (e.channel.onmessage = (m) => e.channel.send(m.data));
+    // Only the number goes back: both ends live on this device, so a full echo would load its network like two calls.
+    b.ondatachannel = (e) => (e.channel.onmessage = (m) => e.channel.send(String(m.data).split(":")[0]!));
 
     const opened = new Promise<boolean>((resolve) => {
       channel.onopen = () => resolve(true);
