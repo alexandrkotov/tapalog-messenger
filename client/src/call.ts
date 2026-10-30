@@ -172,6 +172,9 @@ async function startPeer(c: CallInfo) {
   };
   conn.onicecandidate = (e) => pc === conn && signal({ candidate: e.candidate ? e.candidate.toJSON() : null });
   conn.onnegotiationneeded = async () => {
+    // A fresh connection is always offered by the caller; the other side answers with its tracks in the answer.
+    // Offers from both at once mostly sort themselves out, but now and then leave the call stuck.
+    if (polite && !conn.remoteDescription) return;
     try {
       makingOffer = true;
       await conn.setLocalDescription();
