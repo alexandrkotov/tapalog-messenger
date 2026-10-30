@@ -57,6 +57,9 @@ version in the tag goes into the binaries.
 tapalog-messenger [--port 8443] [--data <dir>] [--no-open]
 ```
 
+The server listens on 127.0.0.1 only: without a tunnel or a reverse proxy it is
+reachable from this computer alone, not from other devices on the same Wi-Fi.
+
 On start it opens a status page in the browser. That page and the Stop button
 need a random admin key created on each start; the link with the key is printed
 to the console and the key is saved in `messenger-data/admin.key`.
