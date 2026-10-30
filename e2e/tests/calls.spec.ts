@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { openChat, signIn, signUp, startChat, type Person } from "./people";
-import { OwnServer } from "./server";
+import { inviteCode, OwnServer } from "./server";
 
 test("without a TURN relay, Settings has no call check", async ({ browser }) => {
   const alice = await signUp(browser, "Alice");
@@ -195,7 +195,8 @@ test("a call only through the relay goes through a real coturn", async ({ browse
   const server = new OwnServer(18580 + info.parallelIndex, ["--turn-url", "turn:127.0.0.1:3478", "--turn-url", "turn:127.0.0.1:3478?transport=tcp", "--turn-secret-file", secretFile]);
   await server.start();
   try {
-    const { alice, bob, chat } = await pair(browser, server.url, () => server.adminInvite());
+    // The setup invite works once; both get ordinary ones.
+    const { alice, bob, chat } = await pair(browser, server.url, () => inviteCode(server.url, server.dataDir));
     for (const who of [alice, bob]) {
       await who.page.getByTestId("settings").click();
       await who.page.getByTestId("call-route").selectOption("relay");
