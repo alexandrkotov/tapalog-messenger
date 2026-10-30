@@ -40,6 +40,10 @@ test("a profile photo is cut where the person moves it, shows up for the other p
   await bob.page.mouse.up();
   await bob.page.getByTestId("crop-save").click();
   await expect(bob.page.getByTestId("settings-panel").getByTestId("avatar-photo")).toBeVisible();
+  // Alice has no photo: Bob's chat with her shows her letter, never his own photo.
+  const bobsRow = bob.page.locator(`[data-testid="chat-row"][data-chat="${chat}"]`);
+  await expect(bobsRow).toBeVisible();
+  await expect(bobsRow.getByTestId("avatar-photo")).toHaveCount(0);
 
   const row = alice.page.locator(`[data-testid="chat-row"][data-chat="${chat}"]`);
   const photo = row.getByTestId("avatar-photo");

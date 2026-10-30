@@ -99,7 +99,9 @@ export function otherMembers(chat: ChatDto): MemberDto[] {
 export function chatPhoto(chat: ChatDto): string | null {
   if (chat.kind === "group") return chat.avatar;
   if (chat.peer_deleted) return null;
-  return otherMembers(chat)[0]?.avatar ?? state.me?.user.avatar ?? null;
+  // Mine only in the chat with myself: someone without a photo shows their letter.
+  const other = otherMembers(chat)[0];
+  return other ? other.avatar : (state.me?.user.avatar ?? null);
 }
 
 export function chatName(chat: ChatDto, s: Strings): string {
