@@ -27,9 +27,26 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
   return data as T;
 }
 
-/** A readable name for this browser in the device list, like "Chrome on Windows". */
+/**
+ * A readable name for this browser in the device list, like "Chrome on Windows".
+ * Most Android browsers say "Chrome/" too, so they are looked for first.
+ */
 export function deviceName(ua = navigator.userAgent): string {
-  const browser = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Browser";
+  const browser = /SamsungBrowser\//.test(ua)
+    ? "Samsung Internet"
+    : /YaBrowser\//.test(ua)
+      ? "Yandex Browser"
+      : /OPR\//.test(ua)
+        ? "Opera"
+        : /Edg(A|iOS)?\//.test(ua)
+          ? "Edge"
+          : /Firefox\/|FxiOS\//.test(ua)
+            ? "Firefox"
+            : /Chrome\/|CriOS\//.test(ua)
+              ? "Chrome"
+              : /Safari\//.test(ua)
+                ? "Safari"
+                : "Browser";
   const os = /Windows/.test(ua)
     ? "Windows"
     : /iPhone|iPad/.test(ua)

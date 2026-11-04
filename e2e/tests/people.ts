@@ -16,9 +16,9 @@ export interface Person {
 }
 
 /** A new browser profile that signs up through an invite link, in English. */
-export async function signUp(browser: Browser, name: string, opts: { baseURL?: string; invite?: string; locale?: string } = {}): Promise<Person> {
+export async function signUp(browser: Browser, name: string, opts: { baseURL?: string; invite?: string; locale?: string; userAgent?: string } = {}): Promise<Person> {
   const baseURL = opts.baseURL ?? "http://localhost:18443";
-  const context = await browser.newContext({ baseURL, locale: opts.locale ?? "en-US" });
+  const context = await browser.newContext({ baseURL, locale: opts.locale ?? "en-US", userAgent: opts.userAgent });
   const page = await context.newPage();
   const username = uniqueName(name.toLowerCase());
   await page.goto(`/invite/${opts.invite ?? (await inviteCode(baseURL))}`);

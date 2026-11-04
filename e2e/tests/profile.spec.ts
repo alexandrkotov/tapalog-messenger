@@ -179,3 +179,22 @@ test("a chosen dark theme outlasts a reload, over a light system setting", async
   await alice.page.getByLabel("Theme").selectOption("system");
   expect(await background()).toBe("rgb(240, 242, 245)");
 });
+
+test("Samsung Internet is named as itself and pointed to Chrome for installing, until the hint is closed", async ({ browser }) => {
+  const samsung =
+    "Mozilla/5.0 (Linux; Android 14; SM-A546B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/27.0 Chrome/125.0.0.0 Mobile Safari/537.36";
+  const alice = await signUp(browser, "Alice", { userAgent: samsung });
+  await expect(alice.page.getByTestId("install-hint")).toContainText("Chrome");
+  await alice.page.getByTestId("install-hint-close").click();
+  await expect(alice.page.getByTestId("install-hint")).toBeHidden();
+  await alice.page.reload();
+  await expect(alice.page.getByRole("heading", { name: "Chats" })).toBeVisible();
+  await expect(alice.page.getByTestId("install-hint")).toBeHidden();
+
+  await alice.page.getByTestId("settings").click();
+  await expect(alice.page.getByText("Samsung Internet on Android")).toBeVisible();
+
+  // Other browsers do not see it.
+  const bob = await signUp(browser, "Bob");
+  await expect(bob.page.getByTestId("install-hint")).toBeHidden();
+});

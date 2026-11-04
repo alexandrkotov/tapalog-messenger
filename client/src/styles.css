@@ -270,6 +270,19 @@ small {
   color: var(--warn);
 }
 
+.install-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 4px 6px 12px;
+  font-size: 13px;
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+}
+.install-hint span {
+  flex: 1;
+}
+
 .chat-list {
   display: flex;
   flex-direction: column;

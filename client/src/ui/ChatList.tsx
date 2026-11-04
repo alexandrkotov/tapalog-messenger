@@ -29,6 +29,7 @@ export function ChatList() {
         </Link>
       </header>
       <ConnBanner />
+      <InstallHint />
       <input class="search" type="search" placeholder={s.search} aria-label={s.search} value={q} onInput={(e) => setQ(e.currentTarget.value)} />
       <div class="chat-list-scroll">
       {chats.length === 0 && !query && <p class="empty">{s.noChats}</p>}
@@ -186,6 +187,42 @@ function FoundMessages({ q }: { q: string }) {
         </button>
       )}
     </section>
+  );
+}
+
+const INSTALL_HINT_KEY = "samsungInstallHintClosed";
+
+/**
+ * Samsung Internet builds its own installed app, for an old Android, and
+ * Google Play Protect blocks it; the app installed from Chrome is fine.
+ * Shown in that browser's tab until closed.
+ */
+function InstallHint() {
+  const s = useLang().s;
+  const [shown, setShown] = useState(() => {
+    if (!/SamsungBrowser\//.test(navigator.userAgent) || matchMedia("(display-mode: standalone)").matches) return false;
+    try {
+      return !localStorage.getItem(INSTALL_HINT_KEY);
+    } catch {
+      return true;
+    }
+  });
+  if (!shown) return null;
+  const close = () => {
+    try {
+      localStorage.setItem(INSTALL_HINT_KEY, "1");
+    } catch {
+      // Private mode: closed until the tab closes.
+    }
+    setShown(false);
+  };
+  return (
+    <p class="install-hint" data-testid="install-hint">
+      <span>{s.samsungInstall}</span>
+      <button type="button" class="icon-button" aria-label={s.close} title={s.close} data-testid="install-hint-close" onClick={close}>
+        ✕
+      </button>
+    </p>
   );
 }
 
