@@ -81,6 +81,7 @@ function SelfView({ stream, mirror }: { stream: MediaStream; mirror: boolean }) 
       onPointerMove={onMove}
       onPointerUp={onUp}
       onPointerCancel={onUp}
+      onLostPointerCapture={onUp}
     >
       <Media stream={stream} video muted class={mirror ? "mirror" : undefined} testid="call-local" />
     </div>

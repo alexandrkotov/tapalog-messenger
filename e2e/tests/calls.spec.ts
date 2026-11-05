@@ -120,14 +120,15 @@ test.describe("calls", () => {
     await alice.page.getByTestId("call-details").click();
     await expect(alice.page.getByTestId("call-details-list")).toHaveAttribute("data-route", "direct", { timeout: 5000 });
 
-    // Alice's own picture starts in the lower right corner; dragged past the top left, it stops at the edge, and stays there after leaving the call screen and coming back.
+    // Alice's own picture starts in the lower right corner; dragged to the very top left, it stops at the edge, and stays there after leaving the call screen and coming back.
+    // The finger stays inside the page: Firefox does not deliver a release outside it, as on a phone it never could be.
     const self = alice.page.getByTestId("call-self");
     const start = (await self.boundingBox())!;
     const view = alice.page.viewportSize()!;
     expect(start.x + start.width).toBeGreaterThan(view.width - 20);
     await alice.page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
     await alice.page.mouse.down();
-    await alice.page.mouse.move(-100, -100, { steps: 5 });
+    await alice.page.mouse.move(1, 1, { steps: 5 });
     await alice.page.mouse.up();
     await expect.poll(async () => (await self.boundingBox())!).toMatchObject({ x: 8, y: 8 });
     await alice.page.getByTestId("call-minimize").click();
