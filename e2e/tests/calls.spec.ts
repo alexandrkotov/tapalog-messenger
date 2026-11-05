@@ -120,6 +120,20 @@ test.describe("calls", () => {
     await alice.page.getByTestId("call-details").click();
     await expect(alice.page.getByTestId("call-details-list")).toHaveAttribute("data-route", "direct", { timeout: 5000 });
 
+    // Alice's own picture starts in the lower right corner; dragged past the top left, it stops at the edge, and stays there after leaving the call screen and coming back.
+    const self = alice.page.getByTestId("call-self");
+    const start = (await self.boundingBox())!;
+    const view = alice.page.viewportSize()!;
+    expect(start.x + start.width).toBeGreaterThan(view.width - 20);
+    await alice.page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+    await alice.page.mouse.down();
+    await alice.page.mouse.move(-100, -100, { steps: 5 });
+    await alice.page.mouse.up();
+    await expect.poll(async () => (await self.boundingBox())!).toMatchObject({ x: 8, y: 8 });
+    await alice.page.getByTestId("call-minimize").click();
+    await alice.page.getByTestId("call-bar").click();
+    await expect.poll(async () => (await self.boundingBox())!).toMatchObject({ x: 8, y: 8 });
+
     // Microphone off and on, camera off: the buttons say what they will do next.
     await alice.page.getByTestId("call-mute").click();
     await expect(alice.page.getByTestId("call-mute")).toHaveAttribute("aria-label", "Turn the microphone on");

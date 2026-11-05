@@ -17,6 +17,76 @@ function Media({ stream, video, muted, class: cls, testid }: { stream: MediaStre
   return video ? <video ref={ref} class={cls} autoplay playsInline muted={muted} data-testid={testid} /> : <audio ref={ref} autoplay data-testid={testid} />;
 }
 
+const SPOT_KEY = "callSelfSpot";
+const share = (n: number) => Math.min(1, Math.max(0, n));
+
+/** Where the person last put their own picture: shares of the free room across and down, so it stays put when the phone turns. Null: the corner. */
+function savedSpot(): { x: number; y: number } | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(SPOT_KEY) ?? "null");
+    return typeof v?.x === "number" && typeof v?.y === "number" ? { x: share(v.x), y: share(v.y) } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** One's own picture, small. A finger moves it anywhere on the screen; it stays there for later calls on this device. */
+function SelfView({ stream, mirror }: { stream: MediaStream; mirror: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [spot, setSpot] = useState(savedSpot);
+  const grab = useRef<{ dx: number; dy: number; spot: { x: number; y: number } | null } | null>(null);
+
+  const onMove = (e: PointerEvent) => {
+    const el = ref.current;
+    const room = el?.parentElement?.getBoundingClientRect();
+    if (!el || !room || !grab.current) return;
+    const freeX = room.width - el.offsetWidth;
+    const freeY = room.height - el.offsetHeight;
+    const next = {
+      x: freeX > 0 ? share((e.clientX - grab.current.dx - room.left) / freeX) : 0,
+      y: freeY > 0 ? share((e.clientY - grab.current.dy - room.top) / freeY) : 0,
+    };
+    grab.current.spot = next;
+    setSpot(next);
+  };
+  const onUp = () => {
+    const done = grab.current?.spot;
+    grab.current = null;
+    if (!done) return;
+    try {
+      localStorage.setItem(SPOT_KEY, JSON.stringify(done));
+    } catch {
+      // Private mode: it stays put for this call only.
+    }
+  };
+
+  const at = spot && {
+    left: `calc(${spot.x} * (100% - var(--self-w)))`,
+    top: `calc(${spot.y} * (100% - var(--self-h)))`,
+    right: "auto",
+    bottom: "auto",
+  };
+  return (
+    <div
+      ref={ref}
+      class="call-local"
+      style={at ?? undefined}
+      data-testid="call-self"
+      onPointerDown={(e) => {
+        const box = ref.current!.getBoundingClientRect();
+        grab.current = { dx: e.clientX - box.left, dy: e.clientY - box.top, spot: null };
+        ref.current!.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      }}
+      onPointerMove={onMove}
+      onPointerUp={onUp}
+      onPointerCancel={onUp}
+    >
+      <Media stream={stream} video muted class={mirror ? "mirror" : undefined} testid="call-local" />
+    </div>
+  );
+}
+
 /** Seconds since the call connected, ticking. */
 function useElapsed(since: number | null): string {
   const [, setTick] = useState(0);
@@ -57,7 +127,11 @@ export function CallScreen() {
     <div class={`call-screen${showVideo ? " video" : ""}`} role="dialog" aria-label={status} data-testid="call-screen" data-phase={c.phase} data-call={c.id}>
       {showVideo && <Media stream={c.remote} video class="call-remote" testid="call-remote" />}
       {!showVideo && <Media stream={c.phase === "ended" ? null : c.remote} video={false} testid="call-remote" />}
-      {showVideo && c.local && !c.cameraOff && <Media stream={c.local} video muted class={`call-local${c.facing === "user" ? " mirror" : ""}`} testid="call-local" />}
+      {showVideo && c.local && !c.cameraOff && (
+        <div class="call-self-room">
+          <SelfView stream={c.local} mirror={c.facing === "user"} />
+        </div>
+      )}
 
       <div class="call-top">
         {talking && (
